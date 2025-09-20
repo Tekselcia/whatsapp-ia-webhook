@@ -335,8 +335,8 @@ def get_ia_config():
                 'args': [
                     ODOO_DB, session['uid'], session['password'],
                     'x_configuracion_ia_tai', 'search_read',
-                    [['x_activo', '=', True]],
-                    ['x_api_key_openai', 'x_respuestas_automaticas', 'x_prompt_del_sistema', 'x_palabras_escalamiento']
+                    [['x_studio_activo', '=', True]],
+                    ['x_studio_nombre', 'x_studio_respuestas_automaticas', 'x_studio_prompt_del_sistema', 'x_studio_palabras_escalamiento']
                 ]
             }
         }
@@ -347,13 +347,13 @@ def get_ia_config():
         if configs:
             config = configs[0]
             return {
-                'api_key': config.get('x_api_key_openai'),
+                'api_key': config.get('x_studio_nombre'),
                 'model_name': 'gpt-3.5-turbo',
                 'max_tokens': 200,
                 'temperature': 0.7,
-                'auto_response': config.get('x_respuestas_automaticas', False),
-                'system_prompt': config.get('x_prompt_del_sistema', ''),
-                'escalation_keywords': config.get('x_palabras_escalamiento', '')
+                'auto_response': config.get('x_studio_respuestas_automaticas', False),
+                'system_prompt': config.get('x_studio_prompt_del_sistema', ''),
+                'escalation_keywords': config.get('x_studio_palabras_escalamiento', '')
             }
         return None
         
@@ -691,3 +691,4 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
 
     app.run(host='0.0.0.0', port=port, debug=False)
+
