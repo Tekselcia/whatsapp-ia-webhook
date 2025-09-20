@@ -334,10 +334,9 @@ def get_ia_config():
                 'method': 'execute',
                 'args': [
                     ODOO_DB, session['uid'], session['password'],
-                    'x_configuracion_ia', 'search_read',
-                    [['x_active', '=', True]],
-                    ['x_api_key', 'x_model_name', 'x_max_tokens', 'x_temperature', 
-                     'x_auto_response', 'x_system_prompt', 'x_escalation_keywords']
+                    'x_configuracion_ia_tai', 'search_read',
+                    [['x_activo', '=', True]],
+                    ['x_api_key_openai', 'x_respuestas_automaticas', 'x_prompt_del_sistema', 'x_palabras_escalamiento']
                 ]
             }
         }
@@ -348,15 +347,14 @@ def get_ia_config():
         if configs:
             config = configs[0]
             return {
-                'api_key': config.get('x_api_key'),
-                'model_name': config.get('x_model_name', 'gpt-3.5-turbo'),
-                'max_tokens': config.get('x_max_tokens', 200),
-                'temperature': config.get('x_temperature', 0.7),
-                'auto_response': config.get('x_auto_response', False),
-                'system_prompt': config.get('x_system_prompt', ''),
-                'escalation_keywords': config.get('x_escalation_keywords', '')
+                'api_key': config.get('x_api_key_openai'),
+                'model_name': 'gpt-3.5-turbo',
+                'max_tokens': 200,
+                'temperature': 0.7,
+                'auto_response': config.get('x_respuestas_automaticas', False),
+                'system_prompt': config.get('x_prompt_del_sistema', ''),
+                'escalation_keywords': config.get('x_palabras_escalamiento', '')
             }
-        
         return None
         
     except Exception as e:
@@ -691,4 +689,5 @@ def test_endpoint():
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
+
     app.run(host='0.0.0.0', port=port, debug=False)
