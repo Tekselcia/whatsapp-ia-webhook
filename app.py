@@ -303,7 +303,7 @@ def create_odoo_message(message_info, partner_id):
                     'create',
                     {
                         'x_studio_partner_id': partner_id,
-                        'x_studio_partenr_phone': message_info['phone'],
+                        'x_studio_partner_phone': message_info['phone'],
                         'x_studio_tipo_de_mensaje': 'inbound',
                         'x_studio_mensaje_whatsapp': message_info['text'],
                         'x_studio_date': datetime.now().isoformat(),
@@ -691,6 +691,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
 
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
