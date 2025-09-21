@@ -520,12 +520,12 @@ def update_message_with_response(message_id, ia_response):
                 'method': 'execute',
                 'args': [
                     ODOO_DB, session['uid'], session['password'],
-                    'x_mensajes_whatsapp', 'write',
+                    'x_ia_tai', 'write',
                     [message_id],
                     {
-                        'x_procesado_por_ia': True,
-                        'x_respuesta_ia': ia_response,
-                        'x_estado': 'responded'
+                        'x_studio_procesado_por_ia': True,
+                        'x_studio_respuesta_ia': ia_response,
+                        'x_studio_estado': 'responded'
                     }
                 ]
             }
@@ -610,11 +610,11 @@ def escalate_message(message_id, message_info):
                 'method': 'execute',
                 'args': [
                     ODOO_DB, session['uid'], session['password'],
-                    'x_mensajes_whatsapp', 'write',
+                    'x_ia_tai', 'write',
                     [message_id],
                     {
                         'x_requiere_humano': True,
-                        'x_estado': 'escalated'
+                        'x_studio_estado': 'escalated'
                     }
                 ]
             }
@@ -691,6 +691,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
 
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
