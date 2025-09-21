@@ -299,15 +299,15 @@ def create_odoo_message(message_info, partner_id):
                 'method': 'execute',
                 'args': [
                     ODOO_DB, session['uid'], session['password'],
-                    'x_mensajes_whatsapp',  # Nombre técnico del modelo
+                    'x_ia_tai',  # Nombre técnico del modelo
                     'create',
                     {
-                        'x_cliente': partner_id,
-                        'x_telefono': message_info['phone'],
-                        'x_tipo_mensaje': 'inbound',
-                        'x_mensaje': message_info['text'],
-                        'x_fecha': datetime.now().isoformat(),
-                        'x_estado': 'received'
+                        'x_studio_partner_id': partner_id,
+                        'x_studio_partenr_phone': message_info['phone'],
+                        'x_studio_tipo_de_mensaje': 'inbound',
+                        'x_studio_mensaje_whatsapp': message_info['text'],
+                        'x_studio_date': datetime.now().isoformat(),
+                        'x_studio_estado': 'received'
                     }
                 ]
             }
@@ -691,5 +691,6 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
 
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
