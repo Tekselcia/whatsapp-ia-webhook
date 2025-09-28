@@ -613,7 +613,7 @@ def escalate_message(message_id, message_info):
                     'x_ia_tai', 'write',
                     [message_id],
                     {
-                        'x_requiere_humano': True,
+                     """x_requiere_humano': True,"""
                         'x_studio_estado': 'escalated'
                     }
                 ]
@@ -691,6 +691,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
 
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
