@@ -167,7 +167,10 @@ def handle_message(message_info):
         
         # 2. Crear mensaje en Odoo
         message_id = create_odoo_message(message_info, partner_id)
-
+        logger.info(f"DEBUG - Returned message_id: {message_id}")
+        if not message_id:
+            logger.error("DEBUG - No se pudo crear mensaje en Odoo")
+    
 message_id = create_odoo_message(message_info, partner_id)
 logger.info(f"DEBUG - Message ID returned: {message_id}")
 if not message_id:
@@ -260,8 +263,7 @@ def get_or_create_partner(message_info):
             }
         }
         
-        response = requests.post(f"{ODOO_URL}/jsonrpc", json=create_data)
-        return response.json().get('result')
+   
 response = requests.post(f"{ODOO_URL}/jsonrpc", json=create_data)
 logger.info(f"DEBUG - Create message response: {response.text}")
 logger.info(f"DEBUG - Create message status: {response.status_code}")
@@ -703,6 +705,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
 
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
