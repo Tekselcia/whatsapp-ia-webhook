@@ -5,6 +5,8 @@ import json
 import logging
 from datetime import datetime
 import os
+from fastapi import FastAPI, Request
+
 
 # ===========================
 # Configuración logging
@@ -784,6 +786,7 @@ def send_whatsapp_message(phone, message_text):
 # ===========================
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+
 
 
 
