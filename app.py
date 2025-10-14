@@ -5,7 +5,7 @@ import json
 import logging
 from datetime import datetime
 import os
-from fastapi import FastAPI, Request
+from flask import Flask, request, jsonify
 
 
 # ===========================
@@ -37,6 +37,14 @@ openai.api_key = OPENAI_API_KEY
 # ===========================
 # Rutas básicas
 # ===========================
+
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    data = request.json
+    # Procesa tu mensaje
+    return jsonify({"status": "ok"})
+    
+
 @app.route('/', methods=['GET'])
 def home():
     return jsonify({
@@ -786,6 +794,7 @@ def send_whatsapp_message(phone, message_text):
 # ===========================
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+
 
 
 
