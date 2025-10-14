@@ -309,10 +309,21 @@ def authenticate_odoo():
         raise e
 
 def create_odoo_message(message_info, partner_id):
-    """Crear mensaje en Odoo"""
+    """Crear mensaje en Odoo con debug completo"""
     try:
+        if not partner_id:
+            logger.error("[DEBUG] No se pudo obtener o crear partner en Odoo. partner_id es None")
+            return None
+
+        # Autenticación Odoo
         session = authenticate_odoo()
-        
+        logger.debug(f"[DEBUG] Sesión Odoo: {session}")
+
+        if not session or not session.get('uid'):
+            logger.error("[DEBUG] Sesión inválida, no se puede crear mensaje")
+            return None
+
+        # Preparar datos para crear mensaje
         create_data = {
             'jsonrpc': '2.0',
             'method': 'call',
@@ -321,26 +332,43 @@ def create_odoo_message(message_info, partner_id):
                 'method': 'execute',
                 'args': [
                     ODOO_DB, session['uid'], session['password'],
-                    'x_ia_tai',  # Nombre técnico del modelo
+                    'x_ia_tai',  # Modelo técnico de mensajes
                     'create',
                     {
                         'x_studio_partner_id': partner_id,
-                        'x_studio_partner_phone': message_info['phone'],
+                        'x_studio_partner_phone': message_info.get('phone', ''),
                         'x_studio_tipo_de_mensaje': 'inbound',
-                        'x_studio_mensaje_whatsapp': message_info['text'],
+                        'x_studio_mensaje_whatsapp': message_info.get('text', ''),
                         'x_studio_date': datetime.now().isoformat(),
                         'x_studio_estado': 'received'
                     }
                 ]
             }
         }
-        
+
+        logger.debug(f"[DEBUG] Datos para crear mensaje en Odoo: {json.dumps(create_data, indent=2)}")
+
+        # Llamada a Odoo
         response = requests.post(f"{ODOO_URL}/jsonrpc", json=create_data)
-        return response.json().get('result')
-        
+        logger.debug(f"[DEBUG] Response status: {response.status_code}")
+        logger.debug(f"[DEBUG] Response content: {response.text}")
+
+        # Procesar resultado
+        try:
+            result = response.json().get('result')
+            logger.debug(f"[DEBUG] Result from Odoo create: {result}")
+        except Exception as e:
+            logger.error(f"[DEBUG] Error parseando JSON de Odoo: {e}")
+            result = None
+
+        if not result:
+            logger.error("[DEBUG] No se pudo crear el mensaje en Odoo. Result es None o vacío.")
+        return result
+
     except Exception as e:
-        logger.error(f"Error creando mensaje: {e}")
+        logger.error(f"[ERROR] Excepción creando mensaje en Odoo: {e}")
         return None
+
 
 def get_ia_config():
     """Obtener configuración IA activa de Odoo"""
@@ -713,6 +741,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
 
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
