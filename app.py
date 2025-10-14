@@ -313,14 +313,15 @@ def create_odoo_message(message_info, partner_id):
             return None
 
         # Preparar payload
-        payload_data = {
-            'x_studio_partner_id': partner_id,
-            'x_studio_partner_phone': message_info['phone'],
-            'x_studio_tipo_de_mensaje': tipo_mensaje,
-            'x_studio_mensaje_whatsapp': message_info['text'],
-            'x_studio_date': datetime.now().replace(microsecond=0).isoformat(),
-            'x_studio_estado': 'received'
-        }
+    payload_data = {
+        'x_studio_partner_id': partner_id,
+        'x_studio_partner_phone': message_info['phone'],
+        'x_studio_tipo_de_mensaje': 'entrada',  # usar el valor permitido
+        'x_studio_mensaje_whatsapp': message_info['text'],
+        'x_studio_date': datetime.now().replace(microsecond=0).isoformat(),
+        'x_studio_estado': 'received'
+    }
+
 
         create_data = {
             'jsonrpc': '2.0',
@@ -623,6 +624,7 @@ def send_whatsapp_message(phone, message_text):
 # ===========================
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+
 
 
 
