@@ -224,12 +224,17 @@ def handle_message(message_info):
         create_error_log(message_info, str(e))
 
 def get_or_create_partner(message_info):
-    """Buscar o crear contacto en Odoo"""
+    """Buscar o crear contacto en Odoo con validación de campos obligatorios"""
     try:
-        # Autenticarse en Odoo
         session = authenticate_odoo()
-        
-        # Buscar contacto existente
+        if not session or not session.get('uid'):
+            logger.error("[DEBUG] Sesión inválida para Odoo")
+            return None
+
+        phone = message_info.get('phone')
+        name = message_info.get('name', phone)
+
+        # 1. Buscar contacto existente por teléfono
         search_data = {
             'jsonrpc': '2.0',
             'method': 'call',
@@ -239,18 +244,51 @@ def get_or_create_partner(message_info):
                 'args': [
                     ODOO_DB, session['uid'], session['password'],
                     'res.partner', 'search',
-                    [['phone', '=', message_info['phone']]]
+                    [['phone', '=', phone]]
                 ]
             }
         }
-        
-        response = requests.post(f"{ODOO_URL}/jsonrpc", json=search_data)
-        partner_ids = response.json().get('result', [])
-        
+        search_response = requests.post(f"{ODOO_URL}/jsonrpc", json=search_data)
+        partner_ids = search_response.json().get('result', [])
         if partner_ids:
+            logger.debug(f"[DEBUG] Contacto existente encontrado: {partner_ids[0]}")
             return partner_ids[0]
-        
-        # Crear nuevo contacto
+
+        # 2. Obtener campos obligatorios del modelo res.partner
+        fields_data = {
+            'jsonrpc': '2.0',
+            'method': 'call',
+            'params': {
+                'service': 'object',
+                'method': 'execute',
+                'args': [
+                    ODOO_DB, session['uid'], session['password'],
+                    'res.partner', 'fields_get',
+                    [],  # todos los campos
+                    {'attributes': ['required']}
+                ]
+            }
+        }
+        fields_response = requests.post(f"{ODOO_URL}/jsonrpc", json=fields_data)
+        fields_result = fields_response.json().get('result', {})
+        required_fields = [f for f, v in fields_result.items() if v.get('required')]
+        logger.debug(f"[DEBUG] Campos obligatorios de res.partner: {required_fields}")
+
+        # 3. Preparar datos de contacto
+        partner_data = {
+            'name': name,
+            'phone': phone,
+            'is_company': False,
+            'customer_rank': 1,
+            'supplier_rank': 0
+        }
+
+        # 4. Validar campos obligatorios
+        missing_fields = [f for f in required_fields if f not in partner_data or not partner_data[f]]
+        if missing_fields:
+            logger.error(f"[DEBUG] Campos obligatorios faltantes al crear contacto: {missing_fields}")
+            return None
+
         create_data = {
             'jsonrpc': '2.0',
             'method': 'call',
@@ -260,28 +298,31 @@ def get_or_create_partner(message_info):
                 'args': [
                     ODOO_DB, session['uid'], session['password'],
                     'res.partner', 'create',
-                    {
-                        'name': message_info['name'],
-                        'phone': message_info['phone'],
-                        'is_company': False,
-                        'customer_rank': 1,
-                        'supplier_rank': 0
-                    }
+                    partner_data
                 ]
             }
         }
-        
-   
+        logger.debug(f"[DEBUG] Payload para crear contacto: {json.dumps(create_data, indent=2)}")
+
         response = requests.post(f"{ODOO_URL}/jsonrpc", json=create_data)
-        logger.info(f"DEBUG - Create message response: {response.text}")
-        logger.info(f"DEBUG - Create message status: {response.status_code}")
-        result = response.json().get('result')
-        logger.info(f"DEBUG - Message ID created: {result}")
-        return result
-    
+        logger.debug(f"[DEBUG] Response status: {response.status_code}")
+        logger.debug(f"[DEBUG] Response content: {response.text}")
+
+        try:
+            result = response.json().get('result')
+            if result:
+                logger.debug(f"[DEBUG] Contacto creado exitosamente: {result}")
+            else:
+                logger.error("[DEBUG] No se pudo crear el contacto en Odoo. Result es None o vacío.")
+            return result
+        except Exception as e:
+            logger.error(f"[DEBUG] Error parseando JSON de Odoo: {e}")
+            return None
+
     except Exception as e:
-        logger.error(f"Error con contacto: {e}")
+        logger.error(f"[ERROR] Excepción buscando/creando contacto: {e}")
         return None
+
 
 def authenticate_odoo():
     """Autenticarse en Odoo"""
@@ -308,36 +349,78 @@ def authenticate_odoo():
         logger.error(f"Error autenticando Odoo: {e}")
         raise e
 
-def create_odoo_message(message_info, partner_id):
-    """Crear mensaje en Odoo con debug completo y validación de campos obligatorios"""
+from datetime import datetime
+
+REQUIRED_FIELDS = [
+    'x_studio_partner_id',
+    'x_studio_partner_phone',
+    'x_studio_tipo_de_mensaje',
+    'x_studio_mensaje_whatsapp',
+    'x_studio_date',
+    'x_studio_estado'
+]
+
+from datetime import datetime
+
+def validate_odoo_payload_generic(model_name, payload):
+    """
+    Valida un payload de Odoo para cualquier modelo.
+    - Verifica campos obligatorios (no None ni vacío)
+    - Valida campos de fecha en formato ISO 8601
+    """
+    errors = []
+
     try:
-        if not partner_id:
-            logger.error("[DEBUG] No se pudo obtener o crear partner en Odoo. partner_id es None")
-            return None
+        # Extraer el diccionario que se enviará a Odoo
+        data = payload.get('params', {}).get('args', [])[4]
 
-        # Autenticación Odoo
-        session = authenticate_odoo()
-        logger.debug(f"[DEBUG] Sesión Odoo: {session}")
+        if not data:
+            errors.append("Payload vacío")
+            return errors
 
-        if not session or not session.get('uid'):
-            logger.error("[DEBUG] Sesión inválida, no se puede crear mensaje")
-            return None
-
-        # Preparar datos para crear mensaje
-        message_data = {
-            'x_studio_partner_id': partner_id,
-            'x_studio_partner_phone': message_info.get('phone', ''),
-            'x_studio_tipo_de_mensaje': 'inbound',
-            'x_studio_mensaje_whatsapp': message_info.get('text', ''),
-            'x_studio_date': datetime.now().isoformat(),
-            'x_studio_estado': 'received'
+        # Lista de campos obligatorios por modelo (puedes ampliarla según tus modelos)
+        required_fields_by_model = {
+            'x_ia_tai': [
+                'x_studio_partner_id',
+                'x_studio_partner_phone',
+                'x_studio_tipo_de_mensaje',
+                'x_studio_mensaje_whatsapp',
+                'x_studio_date',
+                'x_studio_estado'
+            ],
+            'x_logs_ia': [
+                'x_cliente',
+                'x_telefono',
+                'x_mensaje_original',
+                'x_respuesta_ia',
+                'x_estado'
+            ]
+            # Agrega más modelos y sus campos obligatorios aquí
         }
 
-        # Validar campos obligatorios (ejemplo: no pueden estar vacíos)
-        missing_fields = [k for k, v in message_data.items() if v in [None, '']]
-        if missing_fields:
-            logger.error(f"[DEBUG] Campos obligatorios faltantes: {missing_fields}")
-            return None
+        required_fields = required_fields_by_model.get(model_name, [])
+
+        for field in required_fields:
+            if field not in data or data[field] in [None, '']:
+                errors.append(f"Campo obligatorio faltante o vacío: {field}")
+
+        # Validar fechas en formato ISO 8601
+        for key, value in data.items():
+            if 'date' in key.lower() and value:
+                try:
+                    datetime.fromisoformat(value)
+                except Exception:
+                    errors.append(f"Campo {key} no tiene formato ISO 8601 válido: {value}")
+
+    except Exception as e:
+        errors.append(f"Error validando payload: {e}")
+
+    return errors
+
+def create_odoo_message(message_info, partner_id):
+    """Crear mensaje en Odoo con validación y logs detallados"""
+    try:
+        session = authenticate_odoo()
 
         create_data = {
             'jsonrpc': '2.0',
@@ -347,36 +430,53 @@ def create_odoo_message(message_info, partner_id):
                 'method': 'execute',
                 'args': [
                     ODOO_DB, session['uid'], session['password'],
-                    'x_ia_tai',  # Modelo técnico de mensajes
+                    'x_ia_tai',
                     'create',
-                    message_data
+                    {
+                        'x_studio_partner_id': partner_id,
+                        'x_studio_partner_phone': message_info['phone'],
+                        'x_studio_tipo_de_mensaje': 'inbound',
+                        'x_studio_mensaje_whatsapp': message_info['text'],
+                        'x_studio_date': datetime.now().replace(microsecond=0).isoformat(),
+                        'x_studio_estado': 'received'
+                    }
                 ]
             }
         }
 
-        logger.debug(f"[DEBUG] Datos para crear mensaje en Odoo: {json.dumps(create_data, indent=2)}")
+        # Validar payload antes de enviar
+        validation_errors = validate_odoo_payload(create_data)
+        if validation_errors:
+            logger.error(f"[ERROR] Payload inválido para Odoo: {validation_errors}")
+            return None
 
-        # Llamada a Odoo
+        # Log del payload
+        logger.info(f"[DEBUG] Payload para Odoo: {json.dumps(create_data, indent=2)}")
+
         response = requests.post(f"{ODOO_URL}/jsonrpc", json=create_data)
-        logger.debug(f"[DEBUG] Response status: {response.status_code}")
-        logger.debug(f"[DEBUG] Response content: {response.text}")
+        logger.info(f"[DEBUG] Respuesta de Odoo: status={response.status_code}, body={response.text}")
 
-        # Procesar resultado
         try:
-            result = response.json().get('result')
-            logger.debug(f"[DEBUG] Result from Odoo create: {result}")
+            resp_json = response.json()
         except Exception as e:
-            logger.error(f"[DEBUG] Error parseando JSON de Odoo: {e}")
-            result = None
+            logger.error(f"[ERROR] No se pudo parsear JSON de Odoo: {e}")
+            return None
 
+        if 'error' in resp_json:
+            logger.error(f"[ERROR] Odoo respondió con error: {json.dumps(resp_json['error'], indent=2)}")
+            return None
+
+        result = resp_json.get('result')
         if not result:
-            logger.error("[DEBUG] No se pudo crear el mensaje en Odoo. Result es None o vacío.")
+            logger.error("[ERROR] No se creó el mensaje en Odoo. 'result' es None o vacío.")
+        else:
+            logger.info(f"[DEBUG] Mensaje creado en Odoo con ID: {result}")
+
         return result
 
     except Exception as e:
         logger.error(f"[ERROR] Excepción creando mensaje en Odoo: {e}")
         return None
-
 
 def get_ia_config():
     """Obtener configuración IA activa de Odoo"""
@@ -749,6 +849,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
 
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
