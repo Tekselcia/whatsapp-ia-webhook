@@ -158,33 +158,42 @@ def extract_message_info(message, value):
         return None
 
 def handle_message(message_info):
-    """Manejar mensaje completo"""
+    """Manejar mensaje completo con logs de depuración detallados"""
     try:
-        logger.info(f"Procesando mensaje de {message_info['name']}: {message_info['text']}")
+        logger.info(f"[STEP 0] Procesando mensaje de {message_info['name']}: {message_info['text']}")
 
         # 1. Buscar o crear contacto en Odoo
         partner_id = get_or_create_partner(message_info)
+        logger.debug(f"[STEP 1] Partner ID obtenido/creado: {partner_id}")
 
         # 2. Crear mensaje en Odoo
         message_id = create_odoo_message(message_info, partner_id)
-        logger.info(f"DEBUG - Returned message_id: {message_id}")
+        logger.debug(f"[STEP 2] ID de mensaje creado en Odoo: {message_id}")
         if not message_id:
-            logger.error("DEBUG - No se pudo crear mensaje en Odoo")
+            logger.error("[STEP 2] No se pudo crear mensaje en Odoo")
             return
 
         # 3. Verificar si necesita escalamiento
         if needs_escalation(message_info['text']):
+            logger.debug("[STEP 3] Mensaje requiere escalamiento")
             escalate_message(message_id, message_info)
             return
+        else:
+            logger.debug("[STEP 3] Mensaje no requiere escalamiento")
 
         # 4. Obtener configuración IA de Odoo
         ia_config = get_ia_config()
-        if not ia_config or not ia_config.get('auto_response'):
-            logger.info("IA desactivada o sin configuración")
+        if not ia_config:
+            logger.info("[STEP 4] Configuración IA no encontrada")
             return
+        if not ia_config.get('auto_response'):
+            logger.info("[STEP 4] Respuestas automáticas desactivadas")
+            return
+        logger.debug(f"[STEP 4] Configuración IA cargada: {ia_config}")
 
         # 5. Obtener conocimiento relevante
         knowledge_context = get_relevant_knowledge(message_info['text'])
+        logger.debug(f"[STEP 5] Contexto de conocimiento relevante: {knowledge_context}")
 
         # 6. Generar respuesta con IA
         ia_response = generate_ia_response(
@@ -193,21 +202,25 @@ def handle_message(message_info):
             knowledge_context,
             message_info['name']
         )
-
         if ia_response:
+            logger.debug(f"[STEP 6] Respuesta IA generada: {ia_response}")
+
             # 7. Actualizar mensaje en Odoo
             update_message_with_response(message_id, ia_response)
+            logger.debug("[STEP 7] Mensaje actualizado en Odoo con respuesta IA")
 
             # 8. Crear log en Odoo
             create_ia_log(message_info, ia_response, partner_id)
+            logger.debug("[STEP 8] Log de IA creado en Odoo")
 
             # 9. Enviar respuesta por WhatsApp
             send_whatsapp_message(message_info['phone'], ia_response)
-
-            logger.info(f"Respuesta enviada a {message_info['name']}")
+            logger.info(f"[STEP 9] Respuesta enviada a {message_info['name']}")
+        else:
+            logger.debug("[STEP 6] No se generó respuesta IA")
 
     except Exception as e:
-        logger.error(f"Error manejando mensaje: {e}")
+        logger.error(f"[ERROR] Error manejando mensaje: {e}")
         create_error_log(message_info, str(e))
 
 def get_or_create_partner(message_info):
@@ -700,6 +713,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
 
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
