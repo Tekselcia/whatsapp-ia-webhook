@@ -166,72 +166,141 @@ def extract_message_info(message, value):
 # ===========================
 # Manejo completo del mensaje
 # ===========================
-def handle_message(message_info):
+@app.post("/webhook")
+async def handle_message(request: Request):
     try:
-        logger.info(f"[STEP 0] Procesando mensaje de {message_info['name']}: {message_info['text']}")
+        data = await request.json()
+        logger.info(f"[STEP 1] Webhook recibido: {data}")
 
-        # 1. Buscar o crear contacto
-        partner_id = get_or_create_partner(message_info)
-        if not partner_id:
-            logger.error("[STEP 1] No se pudo obtener/crear partner")
-            return
-        logger.info(f"[STEP 1] Partner ID: {partner_id}")
+        message = data.get('message', {})
+        sender = message.get('from')
+        text = message.get('text', {}).get('body', '').strip()
 
-        # 2. Crear mensaje en Odoo
-        message_id = create_odoo_message(message_info, partner_id)
-        if not message_id:
-            logger.error("[STEP 2] No se pudo crear mensaje en Odoo")
-            return
-        logger.info(f"[STEP 2] Mensaje creado en Odoo con ID: {message_id}")
+        if not text:
+            logger.warning("[STEP 2] Mensaje vacío o sin texto")
+            return {"status": "sin texto"}
 
-        # 3. Escalamiento
-        if needs_escalation(message_info['text']):
-            logger.info("[STEP 3] Mensaje requiere escalamiento")
-            escalate_message(message_id, message_info)
-            return
-        else:
-            logger.info("[STEP 3] Mensaje no requiere escalamiento")
+        logger.info(f"[STEP 3] Mensaje recibido de {sender}: {text}")
 
-        # 4. Config IA
+        # 🔹 Obtener configuración de IA desde Odoo
         ia_config = get_ia_config()
-        if not ia_config or not ia_config.get('auto_response'):
-            logger.info("[STEP 4] Respuestas automáticas desactivadas o configuración no encontrada")
-            return
-        logger.info(f"[STEP 4] Configuración IA: {ia_config}")
+        if not ia_config:
+            logger.error("[STEP 4] No se encontró configuración de IA")
+            return {"status": "sin configuración"}
 
-        # 5. Obtener conocimiento relevante
-        knowledge_context = get_relevant_knowledge(message_info['text'])
-        logger.info(f"[STEP 5] Contexto relevante: {knowledge_context}")
+        # 🔹 Analizar si es palabra de escalamiento
+        escalation_keywords = ia_config.get('escalation_keywords', '').lower().split(',')
+        is_escalation = any(word.strip() in text.lower() for word in escalation_keywords)
 
-        # 6. Generar respuesta IA
-        ia_response = generate_ia_response(
-            message_info['text'],
-            ia_config,
-            knowledge_context,
-            message_info['name']
-        )
+        session = authenticate_odoo()
+        if not session:
+            logger.error("[STEP 5] Falló la autenticación con Odoo")
+            return {"status": "error autenticación"}
 
-        if ia_response:
-            logger.info(f"[STEP 6] Respuesta IA generada: {ia_response}")
+        if is_escalation:
+            logger.info("[STEP 6] Palabra de escalamiento detectada 🚨")
 
-            # 7. Actualizar mensaje en Odoo
-            update_message_with_response(message_id, ia_response)
-            logger.info("[STEP 7] Mensaje actualizado con respuesta IA")
+            # ✅ Crear ticket en Odoo
+            ticket_data = {
+                'jsonrpc': '2.0',
+                'method': 'call',
+                'params': {
+                    'service': 'object',
+                    'method': 'execute',
+                    'args': [
+                        ODOO_DB,
+                        session['uid'],
+                        session['password'],
+                        'x_tickets_ia_tai',  # Modelo del ticket
+                        'create',
+                        [{
+                            'x_studio_nombre': f"Escalamiento desde WhatsApp - {sender}",
+                            'x_studio_descripcion': text,
+                            'x_studio_estado': 'nuevo',
+                            'x_studio_origen': 'whatsapp',
+                            'x_studio_cliente': sender
+                        }]
+                    ]
+                }
+            }
 
-            # 8. Crear log IA
-            create_ia_log(message_info, ia_response, partner_id)
-            logger.info("[STEP 8] Log IA creado")
+            resp_ticket = requests.post(f"{ODOO_URL}/jsonrpc", json=ticket_data)
+            logger.info(f"[STEP 7] Ticket creado en Odoo: {resp_ticket.text}")
 
-            # 9. Enviar WhatsApp
-            send_whatsapp_message(message_info['phone'], ia_response)
-            logger.info(f"[STEP 9] Respuesta enviada a {message_info['name']}")
+            # ✅ Enviar confirmación al cliente
+            send_whatsapp_message(sender, "📩 Hemos escalado tu mensaje con nuestro equipo. En breve un asesor te contactará. ¡Gracias por tu paciencia!")
+            
+            return {"status": "ticket creado"}
 
-        else:
-            logger.warning("[STEP 6] No se generó respuesta IA")
+        # 🔹 Generar respuesta con IA
+        prompt = ia_config.get('system_prompt', '')
+        respuesta_ia = generar_respuesta_openai(text, ia_config, prompt)
+
+        logger.info(f"[IA] Respuesta generada: {respuesta_ia}")
+
+        # 🔹 Registrar mensaje en Odoo
+        message_data = {
+            'jsonrpc': '2.0',
+            'method': 'call',
+            'params': {
+                'service': 'object',
+                'method': 'execute',
+                'args': [
+                    ODOO_DB,
+                    session['uid'],
+                    session['password'],
+                    'x_mensajes_ia_tai',
+                    'create',
+                    [{
+                        'x_studio_numero': sender,
+                        'x_studio_mensaje': text,
+                        'x_studio_respuesta': respuesta_ia,
+                        'x_studio_estado': 'responded'
+                    }]
+                ]
+            }
+        }
+
+        response_odoo = requests.post(f"{ODOO_URL}/jsonrpc", json=message_data)
+        logger.info(f"[STEP 8] Log IA creado: {response_odoo.text}")
+
+        # 🔹 Enviar respuesta al cliente por WhatsApp
+        send_whatsapp_message(sender, respuesta_ia)
+        logger.info(f"[STEP 9] Respuesta enviada a {sender}")
+
+        # 🔹 Actualizar estado del mensaje a “responded”
+        try:
+            message_id = response_odoo.json().get('result')
+            if message_id:
+                update_data = {
+                    'jsonrpc': '2.0',
+                    'method': 'call',
+                    'params': {
+                        'service': 'object',
+                        'method': 'execute',
+                        'args': [
+                            ODOO_DB,
+                            session['uid'],
+                            session['password'],
+                            'x_mensajes_ia_tai',
+                            'write',
+                            [[message_id], {'x_studio_estado': 'responded'}]
+                        ]
+                    }
+                }
+                update_resp = requests.post(f"{ODOO_URL}/jsonrpc", json=update_data)
+                logger.info(f"[STEP 10] Estado del mensaje actualizado: {update_resp.text}")
+        except Exception as e:
+            logger.error(f"[ERROR] No se pudo actualizar el estado: {e}")
+
+        return {"status": "ok"}
 
     except Exception as e:
-        logger.error(f"[ERROR] Error manejando mensaje: {e}")
-        create_error_log(message_info, str(e))
+        logger.error(f"[ERROR handle_message]: {e}")
+        return {"status": "error", "detail": str(e)}
+
+
+
 
 # ===========================
 # Funciones Odoo
@@ -715,6 +784,7 @@ def send_whatsapp_message(phone, message_text):
 # ===========================
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+
 
 
 
