@@ -298,10 +298,6 @@ def get_or_create_partner(message_info):
         return None
 
 def create_odoo_message(message_info, partner_id):
-    """
-    Crear mensaje en Odoo con validación de payload.
-    Devuelve el ID del mensaje creado o None.
-    """
     try:
         if not partner_id:
             logger.error("[ERROR] No se puede crear mensaje: partner_id es None")
@@ -317,6 +313,12 @@ def create_odoo_message(message_info, partner_id):
             'x_studio_date': datetime.now().replace(microsecond=0).isoformat(),
             'x_studio_estado': 'received'
         }
+
+        # Validar directamente el diccionario
+        validation_errors = validate_odoo_payload_fields('x_ia_tai', payload_data)
+        if validation_errors:
+            logger.error(f"[ERROR] Payload inválido Odoo: {validation_errors}")
+            return None
 
         create_payload = {
             'jsonrpc': '2.0',
@@ -334,12 +336,6 @@ def create_odoo_message(message_info, partner_id):
                 ]
             }
         }
-
-        # Validar payload antes de enviar
-        validation_errors = validate_odoo_payload('x_ia_tai', create_payload)
-        if validation_errors:
-            logger.error(f"[ERROR] Payload inválido Odoo: {validation_errors}")
-            return None
 
         logger.info(f"[DEBUG] Payload para Odoo: {json.dumps(create_payload, indent=2)}")
         response = requests.post(f"{ODOO_URL}/jsonrpc", json=create_payload)
@@ -362,20 +358,19 @@ def create_odoo_message(message_info, partner_id):
         logger.error(f"[ERROR] Excepción creando mensaje en Odoo: {e}")
         return None
 
-def validate_odoo_payload(model_name, payload):
+
+def validate_odoo_payload_fields(model_name, data):
     """
-    Valida un payload de Odoo para cualquier modelo.
+    Valida un payload de Odoo usando directamente el diccionario de campos.
     - Verifica campos obligatorios (no None ni vacío)
     - Valida campos de fecha en formato ISO 8601
     """
     errors = []
-    try:
-        args = payload.get('params', {}).get('args', [])
-        if len(args) < 5 or not isinstance(args[4], dict):
-            errors.append("Payload inválido: args[4] no es un diccionario")
-            return errors
 
-        data = args[4]
+    try:
+        if not isinstance(data, dict):
+            errors.append("Payload inválido: data no es un diccionario")
+            return errors
 
         # Campos obligatorios por modelo
         required_fields_by_model = {
@@ -617,6 +612,7 @@ def send_whatsapp_message(phone, message_text):
 # ===========================
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+
 
 
 
