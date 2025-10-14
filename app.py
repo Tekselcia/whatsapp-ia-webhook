@@ -485,8 +485,8 @@ def get_relevant_knowledge(message_text):
                 'method': 'execute',
                 'args': [ODOO_DB, session['uid'], session['password'],
                          'x_base_conocimiento', 'search_read',
-                         [['x_active', '=', True]],
-                         ['x_titulo', 'x_palabras_clave', 'x_pregunta', 'x_respuesta', 'x_veces_usada']]
+                         [['x_studio_activo', '=', True]],
+                         ['x_name', 'x_studio_palabras_clave', 'x_studio_pregunta', 'x_studio_respuesta', 'x_studio_veces_usada']]
             }
         }
         response = requests.post(f"{ODOO_URL}/jsonrpc", json=search_data)
@@ -494,11 +494,11 @@ def get_relevant_knowledge(message_text):
         relevant = []
         msg_lower = message_text.lower()
         for item in knowledge_items:
-            keywords = item.get('x_palabras_clave', '')
+            keywords = item.get('x_studio_palabras_clave', '')
             if keywords:
                 if any(k.strip().lower() in msg_lower for k in keywords.split(',')):
-                    relevant.append({'id': item['id'], 'pregunta': item.get('x_pregunta', ''),
-                                     'respuesta': item.get('x_respuesta', ''), 'titulo': item.get('x_titulo', '')})
+                    relevant.append({'id': item['id'], 'pregunta': item.get('x_studio_pregunta', ''),
+                                     'respuesta': item.get('x_studio_respuesta', ''), 'titulo': item.get('x_name', '')})
         return relevant[:3]
     except Exception as e:
         logger.error(f"Error get_relevant_knowledge: {e}")
@@ -586,8 +586,8 @@ def create_ia_log(message_info, ia_response, partner_id):
                          {'x_cliente': partner_id,
                           'x_telefono': message_info['phone'],
                           'x_mensaje_original': message_info['text'],
-                          'x_respuesta_ia': ia_response,
-                          'x_estado': 'sent',
+                          'x_studio_respuesta_ia': ia_response,
+                          'x_studio_estado': 'sent',
                           'x_tiempo_procesamiento': 2.5}]
             }
         }
@@ -607,11 +607,11 @@ def create_error_log(message_info, error_message):
                 'args': [ODOO_DB, session['uid'], session['password'],
                          'x_logs_ia', 'create',
                          {'x_cliente': message_info.get('phone'),
-                          'x_telefono': message_info.get('phone'),
-                          'x_mensaje_original': message_info.get('text'),
-                          'x_respuesta_ia': error_message,
-                          'x_estado': 'error',
-                          'x_tiempo_procesamiento': 0}]
+                          'x_studio_telefono': message_info.get('phone'),
+                          'x_studio_mensaje_original': message_info.get('text'),
+                          'x_studio_respuesta_ia': error_message,
+                          'x_studio_estado': 'error',
+                          'x_studio_tiempo_procesamiento': 0}]
             }
         }
         requests.post(f"{ODOO_URL}/jsonrpc", json=create_data)
@@ -621,6 +621,8 @@ def create_error_log(message_info, error_message):
 def escalate_message(message_id, message_info):
     try:
         session = authenticate_odoo()
+
+        # 1️⃣ Marcar el mensaje como escalated
         update_data = {
             'jsonrpc': '2.0',
             'method': 'call',
@@ -633,9 +635,39 @@ def escalate_message(message_id, message_info):
             }
         }
         requests.post(f"{ODOO_URL}/jsonrpc", json=update_data)
-        logger.info(f"Mensaje {message_id} escalado correctamente")
+
+        # 2️⃣ Crear ticket de escalamiento
+        ticket_data = {
+            'name': f"Reclamo de {message_info['name']}",
+            'partner_id': message_info.get('partner_id'),  # si lo tienes
+            'phone': message_info['phone'],
+            'description': message_info['text'],
+            'state': 'new',
+            'x_origen': 'WhatsApp'
+        }
+        create_ticket = {
+            'jsonrpc': '2.0',
+            'method': 'call',
+            'params': {
+                'service': 'object',
+                'method': 'execute',
+                'args': [ODOO_DB, session['uid'], session['password'],
+                         'helpdesk.ticket', 'create', [ticket_data]]
+            }
+        }
+        response = requests.post(f"{ODOO_URL}/jsonrpc", json=create_ticket)
+        ticket_id = response.json().get('result')
+        logger.info(f"Ticket de escalamiento creado con ID: {ticket_id}")
+
+        # 3️⃣ (Opcional) Notificar al usuario que se ha escalado
+        send_whatsapp_message(
+            message_info['phone'],
+            "Hemos recibido tu mensaje y nuestro equipo lo atenderá como reclamo."
+        )
+
     except Exception as e:
-        logger.error(f"Error escalando mensaje: {e}")
+        logger.error(f"Error escalando mensaje y creando ticket: {e}")
+
 
 # ===========================
 # WhatsApp API
@@ -661,6 +693,7 @@ def send_whatsapp_message(phone, message_text):
 # ===========================
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+
 
 
 
