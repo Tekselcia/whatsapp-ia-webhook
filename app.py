@@ -309,7 +309,7 @@ def authenticate_odoo():
         raise e
 
 def create_odoo_message(message_info, partner_id):
-    """Crear mensaje en Odoo con debug completo"""
+    """Crear mensaje en Odoo con debug completo y validación de campos obligatorios"""
     try:
         if not partner_id:
             logger.error("[DEBUG] No se pudo obtener o crear partner en Odoo. partner_id es None")
@@ -324,6 +324,21 @@ def create_odoo_message(message_info, partner_id):
             return None
 
         # Preparar datos para crear mensaje
+        message_data = {
+            'x_studio_partner_id': partner_id,
+            'x_studio_partner_phone': message_info.get('phone', ''),
+            'x_studio_tipo_de_mensaje': 'inbound',
+            'x_studio_mensaje_whatsapp': message_info.get('text', ''),
+            'x_studio_date': datetime.now().isoformat(),
+            'x_studio_estado': 'received'
+        }
+
+        # Validar campos obligatorios (ejemplo: no pueden estar vacíos)
+        missing_fields = [k for k, v in message_data.items() if v in [None, '']]
+        if missing_fields:
+            logger.error(f"[DEBUG] Campos obligatorios faltantes: {missing_fields}")
+            return None
+
         create_data = {
             'jsonrpc': '2.0',
             'method': 'call',
@@ -334,14 +349,7 @@ def create_odoo_message(message_info, partner_id):
                     ODOO_DB, session['uid'], session['password'],
                     'x_ia_tai',  # Modelo técnico de mensajes
                     'create',
-                    {
-                        'x_studio_partner_id': partner_id,
-                        'x_studio_partner_phone': message_info.get('phone', ''),
-                        'x_studio_tipo_de_mensaje': 'inbound',
-                        'x_studio_mensaje_whatsapp': message_info.get('text', ''),
-                        'x_studio_date': datetime.now().isoformat(),
-                        'x_studio_estado': 'received'
-                    }
+                    message_data
                 ]
             }
         }
@@ -741,6 +749,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
 
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
