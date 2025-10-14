@@ -298,38 +298,38 @@ def get_or_create_partner(message_info):
         return None
 
 def create_odoo_message(message_info, partner_id):
+    """Crear mensaje en Odoo con validación y manejo de Selection"""
     try:
-        if not partner_id:
-            logger.error("[ERROR] No se puede crear mensaje: partner_id es None")
+        session = authenticate_odoo()
+        if not session or not session.get('uid'):
+            logger.error("[STEP 2] Sesión inválida para Odoo")
             return None
 
-        session = authenticate_odoo()
+        # Verificar valor válido para campo Selection
+        valid_tipo_mensaje = ['entrada', 'salida', 'otro']  # Ajusta según tu modelo
+        tipo_mensaje = 'entrada'  # Mensaje entrante
+        if tipo_mensaje not in valid_tipo_mensaje:
+            logger.error(f"[STEP 2] Valor inválido para x_studio_tipo_de_mensaje: {tipo_mensaje}")
+            return None
 
+        # Preparar payload
         payload_data = {
             'x_studio_partner_id': partner_id,
             'x_studio_partner_phone': message_info['phone'],
-            'x_studio_tipo_de_mensaje': 'inbound',
+            'x_studio_tipo_de_mensaje': tipo_mensaje,
             'x_studio_mensaje_whatsapp': message_info['text'],
             'x_studio_date': datetime.now().replace(microsecond=0).isoformat(),
             'x_studio_estado': 'received'
         }
 
-        # Validar directamente el diccionario
-        validation_errors = validate_odoo_payload_fields('x_ia_tai', payload_data)
-        if validation_errors:
-            logger.error(f"[ERROR] Payload inválido Odoo: {validation_errors}")
-            return None
-
-        create_payload = {
+        create_data = {
             'jsonrpc': '2.0',
             'method': 'call',
             'params': {
                 'service': 'object',
                 'method': 'execute',
                 'args': [
-                    ODOO_DB,
-                    session['uid'],
-                    session['password'],
+                    ODOO_DB, session['uid'], session['password'],
                     'x_ia_tai',
                     'create',
                     payload_data
@@ -337,27 +337,38 @@ def create_odoo_message(message_info, partner_id):
             }
         }
 
-        logger.info(f"[DEBUG] Payload para Odoo: {json.dumps(create_payload, indent=2)}")
-        response = requests.post(f"{ODOO_URL}/jsonrpc", json=create_payload)
-        logger.info(f"[DEBUG] Respuesta de Odoo: status={response.status_code}, body={response.text}")
+        # Validar payload genérico
+        validation_errors = validate_odoo_payload_generic('x_ia_tai', create_data)
+        if validation_errors:
+            logger.error(f"[ERROR] Payload inválido Odoo: {validation_errors}")
+            return None
 
-        resp_json = response.json()
+        logger.debug(f"[STEP 2] Payload para Odoo: {json.dumps(create_data, indent=2)}")
+
+        response = requests.post(f"{ODOO_URL}/jsonrpc", json=create_data)
+        logger.debug(f"[STEP 2] Respuesta Odoo: status={response.status_code}, body={response.text}")
+
+        try:
+            resp_json = response.json()
+        except Exception as e:
+            logger.error(f"[STEP 2] No se pudo parsear JSON de Odoo: {e}")
+            return None
+
         if 'error' in resp_json:
-            logger.error(f"[ERROR] Odoo respondió con error: {json.dumps(resp_json['error'], indent=2)}")
+            logger.error(f"[STEP 2] Odoo respondió con error: {json.dumps(resp_json['error'], indent=2)}")
             return None
 
         result = resp_json.get('result')
         if not result:
-            logger.error("[ERROR] No se creó el mensaje en Odoo. 'result' es None o vacío.")
-            return None
+            logger.error("[STEP 2] No se creó el mensaje en Odoo. 'result' es None o vacío.")
+        else:
+            logger.info(f"[STEP 2] Mensaje creado en Odoo con ID: {result}")
 
-        logger.info(f"[DEBUG] Mensaje creado en Odoo con ID: {result}")
         return result
 
     except Exception as e:
-        logger.error(f"[ERROR] Excepción creando mensaje en Odoo: {e}")
+        logger.error(f"[STEP 2] Excepción creando mensaje en Odoo: {e}")
         return None
-
 
 def validate_odoo_payload_fields(model_name, data):
     """
@@ -612,6 +623,7 @@ def send_whatsapp_message(phone, message_text):
 # ===========================
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+
 
 
 
