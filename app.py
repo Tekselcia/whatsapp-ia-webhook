@@ -736,7 +736,7 @@ def escalate_message(message_id, message_info):
         else:
             logger.info(f"Mensaje {message_id} escalado correctamente en Odoo")
 
-        # 2️⃣ Crear ticket de reclamo o incidencia en Odoo (x_tickets_ia)
+        # 2️⃣ Crear ticket de reclamo o incidencia en Odoo (helpdesk.ticket)
         ticket_data = {
             'x_cliente': message_info.get('phone'),
             'x_telefono': message_info.get('phone'),
@@ -752,7 +752,7 @@ def escalate_message(message_id, message_info):
                 'method': 'execute',
                 'args': [
                     ODOO_DB, session['uid'], session['password'],
-                    'x_tickets_ia', 'create',
+                    'helpdesk.ticket', 'create',
                     [ticket_data]
                 ]
             }
@@ -794,6 +794,7 @@ def send_whatsapp_message(phone, message_text):
 # ===========================
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+
 
 
 
