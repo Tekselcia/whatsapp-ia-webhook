@@ -298,30 +298,26 @@ def get_or_create_partner(message_info):
         return None
 
 def create_odoo_message(message_info, partner_id):
-    """Crear mensaje en Odoo con validación y manejo de Selection"""
     try:
         session = authenticate_odoo()
         if not session or not session.get('uid'):
             logger.error("[STEP 2] Sesión inválida para Odoo")
             return None
 
-        # Verificar valor válido para campo Selection
-        valid_tipo_mensaje = ['entrada', 'salida', 'otro']  # Ajusta según tu modelo
-        tipo_mensaje = 'entrada'  # Mensaje entrante
-        if tipo_mensaje not in valid_tipo_mensaje:
-            logger.error(f"[STEP 2] Valor inválido para x_studio_tipo_de_mensaje: {tipo_mensaje}")
+        payload_data = {
+            'x_studio_partner_id': partner_id,
+            'x_studio_partner_phone': message_info['phone'],
+            'x_studio_tipo_de_mensaje': 'entrada',  # valor válido
+            'x_studio_mensaje_whatsapp': message_info['text'],
+            'x_studio_date': datetime.now().replace(microsecond=0).isoformat(),
+            'x_studio_estado': 'received'
+        }
+
+        # Validar payload antes de enviar
+        validation_errors = validate_odoo_payload_fields('x_ia_tai', payload_data)
+        if validation_errors:
+            logger.error(f"[ERROR] Payload inválido Odoo: {validation_errors}")
             return None
-
-        # Preparar payload
-    payload_data = {
-        'x_studio_partner_id': partner_id,
-        'x_studio_partner_phone': message_info['phone'],
-        'x_studio_tipo_de_mensaje': 'entrada',  # usar el valor permitido
-        'x_studio_mensaje_whatsapp': message_info['text'],
-        'x_studio_date': datetime.now().replace(microsecond=0).isoformat(),
-        'x_studio_estado': 'received'
-    }
-
 
         create_data = {
             'jsonrpc': '2.0',
@@ -333,22 +329,12 @@ def create_odoo_message(message_info, partner_id):
                     ODOO_DB, session['uid'], session['password'],
                     'x_ia_tai',
                     'create',
-                    payload_data
+                    [payload_data]  # ✅ Debe ser lista
                 ]
             }
         }
 
-        # Validar payload genérico
-        validation_errors = validate_odoo_payload_generic('x_ia_tai', create_data)
-        if validation_errors:
-            logger.error(f"[ERROR] Payload inválido Odoo: {validation_errors}")
-            return None
-
-        logger.debug(f"[STEP 2] Payload para Odoo: {json.dumps(create_data, indent=2)}")
-
         response = requests.post(f"{ODOO_URL}/jsonrpc", json=create_data)
-        logger.debug(f"[STEP 2] Respuesta Odoo: status={response.status_code}, body={response.text}")
-
         try:
             resp_json = response.json()
         except Exception as e:
@@ -370,6 +356,7 @@ def create_odoo_message(message_info, partner_id):
     except Exception as e:
         logger.error(f"[STEP 2] Excepción creando mensaje en Odoo: {e}")
         return None
+
 
 def validate_odoo_payload_fields(model_name, data):
     """
@@ -624,6 +611,7 @@ def send_whatsapp_message(phone, message_text):
 # ===========================
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+
 
 
 
