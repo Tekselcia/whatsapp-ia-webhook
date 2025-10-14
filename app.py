@@ -170,7 +170,10 @@ def handle_message(message_info):
         logger.info(f"DEBUG - Returned message_id: {message_id}")
         if not message_id:
             logger.error("DEBUG - No se pudo crear mensaje en Odoo")
-    
+    except Exception as e:
+        logger.error(f"Error manejando mensaje: {e}")
+        create_error_log(message_info, str(e))
+          
 message_id = create_odoo_message(message_info, partner_id)
 logger.info(f"DEBUG - Message ID returned: {message_id}")
 if not message_id:
@@ -705,6 +708,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
 
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
