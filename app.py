@@ -6,12 +6,15 @@ import logging
 from datetime import datetime
 import os
 
-
 # ===========================
 # Configuración logging
 # ===========================
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logging.basicConfig(
+    logger = logging.getLogger(__name__)
+    stream=sys.stdout,
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
 
 # ===========================
 # Configuración Flask
@@ -36,13 +39,6 @@ openai.api_key = OPENAI_API_KEY
 # ===========================
 # Rutas básicas
 # ===========================
-
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    data = request.json
-    # Procesa tu mensaje
-    return jsonify({"status": "ok"})
-    
 
 @app.route('/', methods=['GET'])
 def home():
@@ -71,7 +67,7 @@ def verify_webhook():
     except Exception as e:
         logger.error(f"Error en verificación: {e}")
         return 'Error', 500
-
+        
 @app.route('/webhook', methods=['POST'])
 def whatsapp_webhook():
     """Procesar mensajes de WhatsApp"""
@@ -190,11 +186,21 @@ def generar_respuesta_openai(text, config, prompt):
     return response.choices[0].message['content']
 
 def send_whatsapp_message(to, message):
-    # Ajusta según tu API de WhatsApp
-    payload = {"to": to, "message": message}
-    requests.post("https://api.whatsapp.com/sendMessage", json=payload)
+    url = f"https://graph.facebook.com/v19.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "text",
+        "text": {"body": message}
+    }
+    response = requests.post(url, headers=headers, json=payload)
+    logger.info(f"Mensaje enviado a {to}: {response.text}")
 
-@app.route('/webhook', methods=['POST'])
+
 def handle_message():
     try:
         data = request.get_json()
@@ -802,6 +808,7 @@ def send_whatsapp_message(phone, message_text):
 # ===========================
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+
 
 
 
