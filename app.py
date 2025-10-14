@@ -172,33 +172,36 @@ def handle_message(message_info):
 
         # 1. Buscar o crear contacto
         partner_id = get_or_create_partner(message_info)
-        logger.debug(f"[STEP 1] Partner ID obtenido/creado: {partner_id}")
+        if not partner_id:
+            logger.error("[STEP 1] No se pudo obtener/crear partner")
+            return
+        logger.info(f"[STEP 1] Partner ID: {partner_id}")
 
         # 2. Crear mensaje en Odoo
         message_id = create_odoo_message(message_info, partner_id)
         if not message_id:
             logger.error("[STEP 2] No se pudo crear mensaje en Odoo")
             return
-        logger.debug(f"[STEP 2] ID de mensaje creado en Odoo: {message_id}")
+        logger.info(f"[STEP 2] Mensaje creado en Odoo con ID: {message_id}")
 
         # 3. Escalamiento
         if needs_escalation(message_info['text']):
-            logger.debug("[STEP 3] Mensaje requiere escalamiento")
+            logger.info("[STEP 3] Mensaje requiere escalamiento")
             escalate_message(message_id, message_info)
             return
         else:
-            logger.debug("[STEP 3] Mensaje no requiere escalamiento")
+            logger.info("[STEP 3] Mensaje no requiere escalamiento")
 
         # 4. Config IA
         ia_config = get_ia_config()
         if not ia_config or not ia_config.get('auto_response'):
             logger.info("[STEP 4] Respuestas automáticas desactivadas o configuración no encontrada")
             return
-        logger.debug(f"[STEP 4] Configuración IA: {ia_config}")
+        logger.info(f"[STEP 4] Configuración IA: {ia_config}")
 
-        # 5. Obtener conocimiento
+        # 5. Obtener conocimiento relevante
         knowledge_context = get_relevant_knowledge(message_info['text'])
-        logger.debug(f"[STEP 5] Contexto relevante: {knowledge_context}")
+        logger.info(f"[STEP 5] Contexto relevante: {knowledge_context}")
 
         # 6. Generar respuesta IA
         ia_response = generate_ia_response(
@@ -207,23 +210,24 @@ def handle_message(message_info):
             knowledge_context,
             message_info['name']
         )
+
         if ia_response:
-            logger.debug(f"[STEP 6] Respuesta IA: {ia_response}")
+            logger.info(f"[STEP 6] Respuesta IA generada: {ia_response}")
 
             # 7. Actualizar mensaje en Odoo
             update_message_with_response(message_id, ia_response)
-            logger.debug("[STEP 7] Mensaje actualizado con respuesta IA")
+            logger.info("[STEP 7] Mensaje actualizado con respuesta IA")
 
             # 8. Crear log IA
             create_ia_log(message_info, ia_response, partner_id)
-            logger.debug("[STEP 8] Log IA creado")
+            logger.info("[STEP 8] Log IA creado")
 
             # 9. Enviar WhatsApp
             send_whatsapp_message(message_info['phone'], ia_response)
             logger.info(f"[STEP 9] Respuesta enviada a {message_info['name']}")
 
         else:
-            logger.debug("[STEP 6] No se generó respuesta IA")
+            logger.warning("[STEP 6] No se generó respuesta IA")
 
     except Exception as e:
         logger.error(f"[ERROR] Error manejando mensaje: {e}")
@@ -428,29 +432,47 @@ def get_ia_config():
             'params': {
                 'service': 'object',
                 'method': 'execute',
-                'args': [ODOO_DB, session['uid'], session['password'],
-                         'x_configuracion_ia_tai', 'search_read',
-                         [['x_studio_activo', '=', True]],
-                         ['x_studio_nombre', 'x_studio_respuestas_automticas', 'x_studio_prompt_del_sistema', 'x_studio_palabras_escalamiento']]
+                'args': [
+                    ODOO_DB, session['uid'], session['password'],
+                    'x_configuracion_ia_tai', 'search_read',
+                    [['x_studio_activo', '=', True]],
+                    [
+                        'x_studio_nombre',                   # Asegúrate aquí que contiene la API key
+                        'x_studio_respuestas_automticas',  # Corrige typo si tu campo es diferente
+                        'x_studio_prompt_del_sistema',
+                        'x_studio_palabras_escalamiento'
+                    ]
+                ]
             }
         }
         response = requests.post(f"{ODOO_URL}/jsonrpc", json=search_data)
         configs = response.json().get('result', [])
-        if configs:
-            config = configs[0]
-            return {
-                'api_key': config.get('x_studio_nombre'),
-                'model_name': 'gpt-3.5-turbo',
-                'max_tokens': 200,
-                'temperature': 0.7,
-                'auto_response': config.get('x_studio_respuestas_automticas', False),
-                'system_prompt': config.get('x_studio_prompt_del_sistema', ''),
-                'escalation_keywords': config.get('x_studio_palabras_escalamiento', '')
-            }
-        return None
+        if not configs:
+            logger.warning("[IA] No se encontró configuración activa en Odoo")
+            return None
+
+        config = configs[0]
+        ia_config = {
+            'api_key': config.get('x_studio_nombre', '').strip(),
+            'model_name': 'gpt-3.5-turbo',
+            'max_tokens': 200,
+            'temperature': 0.7,
+            'auto_response': config.get('x_studio_respuestas_automticas', False),
+            'system_prompt': config.get('x_studio_prompt_del_sistema', 'Eres un asistente profesional. Responde cordialmente.'),
+            'escalation_keywords': config.get('x_studio_palabras_escalamiento', '')
+        }
+
+        if not ia_config['api_key']:
+            logger.error("[IA] La API key de OpenAI no está configurada en Odoo")
+            return None
+
+        logger.info(f"[IA] Configuración IA obtenida: {ia_config}")
+        return ia_config
+
     except Exception as e:
         logger.error(f"Error get_ia_config: {e}")
         return None
+
 
 def get_relevant_knowledge(message_text):
     try:
@@ -497,24 +519,38 @@ def needs_escalation(message_text):
 
 def generate_ia_response(message_text, ia_config, knowledge_context, customer_name):
     try:
-        openai.api_key = ia_config.get('api_key')
+        if not ia_config or not ia_config.get('api_key'):
+            logger.error("[IA] No hay configuración de IA válida o falta API key")
+            return None
+
+        openai.api_key = ia_config['api_key']
+
+        # Construir contexto de conocimiento relevante
         knowledge_text = ""
         if knowledge_context:
             knowledge_text = "\n\nINFORMACIÓN RELEVANTE:\n" + \
                              "\n".join(f"- {item['titulo']}: {item['respuesta']}" for item in knowledge_context)
-        system_prompt = ia_config.get('system_prompt') or \
-            "Eres un asistente profesional. Responde cordialmente y ofrece ayuda adicional."
-        full_prompt = f"{system_prompt}\n\nCLIENTE: {customer_name}\nMENSAJE: {message_text}\nResponde:"
+
+        system_prompt = ia_config.get('system_prompt', 'Eres un asistente profesional. Responde cordialmente.')
+        full_prompt = f"{system_prompt}\n\nCLIENTE: {customer_name}\nMENSAJE: {message_text}{knowledge_text}\nResponde:"
+
+        logger.info(f"[IA] Prompt enviado a OpenAI:\n{full_prompt}")
+
         response = openai.ChatCompletion.create(
             model=ia_config.get('model_name', 'gpt-3.5-turbo'),
             messages=[{"role": "user", "content": full_prompt}],
             max_tokens=ia_config.get('max_tokens', 200),
             temperature=ia_config.get('temperature', 0.7)
         )
-        return response.choices[0].message.content.strip()
+
+        ia_result = response.choices[0].message.content.strip()
+        logger.info(f"[IA] Respuesta generada: {ia_result}")
+        return ia_result
+
     except Exception as e:
-        logger.error(f"Error generate_ia_response: {e}")
+        logger.error(f"[IA] Error generando respuesta: {e}")
         return "Disculpa, estamos teniendo problemas técnicos. Un agente te contactará."
+        
 
 def update_message_with_response(message_id, ia_response):
     try:
@@ -625,6 +661,7 @@ def send_whatsapp_message(phone, message_text):
 # ===========================
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+
 
 
 
