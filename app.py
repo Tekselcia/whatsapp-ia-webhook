@@ -161,59 +161,51 @@ def handle_message(message_info):
     """Manejar mensaje completo"""
     try:
         logger.info(f"Procesando mensaje de {message_info['name']}: {message_info['text']}")
-        
+
         # 1. Buscar o crear contacto en Odoo
         partner_id = get_or_create_partner(message_info)
-        
+
         # 2. Crear mensaje en Odoo
         message_id = create_odoo_message(message_info, partner_id)
         logger.info(f"DEBUG - Returned message_id: {message_id}")
         if not message_id:
             logger.error("DEBUG - No se pudo crear mensaje en Odoo")
-    except Exception as e:
-        logger.error(f"Error manejando mensaje: {e}")
-        create_error_log(message_info, str(e))
-          
-message_id = create_odoo_message(message_info, partner_id)
-logger.info(f"DEBUG - Message ID returned: {message_id}")
-if not message_id:
-    logger.error("DEBUG - Failed to create message in Odoo")
-    return
-        
+            return
+
         # 3. Verificar si necesita escalamiento
         if needs_escalation(message_info['text']):
             escalate_message(message_id, message_info)
             return
-        
+
         # 4. Obtener configuración IA de Odoo
         ia_config = get_ia_config()
         if not ia_config or not ia_config.get('auto_response'):
             logger.info("IA desactivada o sin configuración")
             return
-        
+
         # 5. Obtener conocimiento relevante
         knowledge_context = get_relevant_knowledge(message_info['text'])
-        
+
         # 6. Generar respuesta con IA
         ia_response = generate_ia_response(
-            message_info['text'], 
-            ia_config, 
+            message_info['text'],
+            ia_config,
             knowledge_context,
             message_info['name']
         )
-        
+
         if ia_response:
             # 7. Actualizar mensaje en Odoo
             update_message_with_response(message_id, ia_response)
-            
+
             # 8. Crear log en Odoo
             create_ia_log(message_info, ia_response, partner_id)
-            
+
             # 9. Enviar respuesta por WhatsApp
             send_whatsapp_message(message_info['phone'], ia_response)
-            
+
             logger.info(f"Respuesta enviada a {message_info['name']}")
-        
+
     except Exception as e:
         logger.error(f"Error manejando mensaje: {e}")
         create_error_log(message_info, str(e))
@@ -708,6 +700,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
 
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
