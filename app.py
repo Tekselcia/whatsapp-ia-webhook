@@ -504,19 +504,6 @@ def get_relevant_knowledge(message_text):
         logger.error(f"Error get_relevant_knowledge: {e}")
         return []
 
-def needs_escalation(message_text):
-    try:
-        ia_config = get_ia_config()
-        if not ia_config:
-            return False
-        keywords = ia_config.get('escalation_keywords', '')
-        if not keywords:
-            return False
-        return any(k.strip().lower() in message_text.lower() for k in keywords.split(','))
-    except Exception as e:
-        logger.error(f"Error needs_escalation: {e}")
-        return False
-
 def generate_ia_response(message_text, ia_config, knowledge_context, customer_name):
     try:
         if not ia_config or not ia_config.get('api_key'):
@@ -618,32 +605,65 @@ def create_error_log(message_info, error_message):
     except Exception as e:
         logger.error(f"Error creando log de error: {e}")
 
+# ===========================
+# Función para determinar si un mensaje requiere escalamiento
+# ===========================
+def needs_escalation(message_text):
+    try:
+        ia_config = get_ia_config()
+        if not ia_config:
+            return False
+        keywords = ia_config.get('escalation_keywords', '')
+        if not keywords:
+            return False
+        # Verificar si alguna palabra clave aparece en el mensaje (case insensitive)
+        return any(k.strip().lower() in message_text.lower() for k in keywords.split(','))
+    except Exception as e:
+        logger.error(f"Error needs_escalation: {e}")
+        return False
+
+# ===========================
+# Función para escalamiento
+# ===========================
 def escalate_message(message_id, message_info):
     try:
         session = authenticate_odoo()
+        if not session or not session.get('uid'):
+            logger.error("No se pudo autenticar Odoo para escalamiento")
+            return
 
-        # 1️⃣ Marcar el mensaje como escalated
+        # Asegurarse de que sea lista de enteros
+        ids_to_update = message_id if isinstance(message_id, list) else [message_id]
+
+        # 1️⃣ Actualizar estado del mensaje en Odoo
         update_data = {
             'jsonrpc': '2.0',
             'method': 'call',
             'params': {
                 'service': 'object',
                 'method': 'execute',
-                'args': [ODOO_DB, session['uid'], session['password'],
-                         'x_ia_tai', 'write', [message_id],
-                         {'x_studio_estado': 'escalated'}]
+                'args': [
+                    ODOO_DB, session['uid'], session['password'],
+                    'x_ia_tai', 'write',
+                    ids_to_update,
+                    {'x_studio_estado': 'escalated'}
+                ]
             }
         }
-        requests.post(f"{ODOO_URL}/jsonrpc", json=update_data)
+        response = requests.post(f"{ODOO_URL}/jsonrpc", json=update_data)
+        resp_json = response.json()
+        if resp_json.get('error'):
+            logger.error(f"Error Odoo escalando mensaje: {resp_json['error']}")
+        else:
+            logger.info(f"Mensaje {message_id} escalado correctamente en Odoo")
 
-        # 2️⃣ Crear ticket de escalamiento
+        # 2️⃣ Crear ticket de reclamo o incidencia en Odoo (x_tickets_ia)
         ticket_data = {
-            'name': f"Reclamo de {message_info['name']}",
-            'partner_id': message_info.get('partner_id'),  # si lo tienes
-            'phone': message_info['phone'],
-            'description': message_info['text'],
-            'state': 'new',
-            'x_origen': 'WhatsApp'
+            'x_cliente': message_info.get('phone'),
+            'x_telefono': message_info.get('phone'),
+            'x_mensaje_original': message_info.get('text'),
+            'x_estado': 'open',
+            'x_tipo': 'Reclamo'  # Puedes adaptarlo según tu modelo
         }
         create_ticket = {
             'jsonrpc': '2.0',
@@ -651,23 +671,25 @@ def escalate_message(message_id, message_info):
             'params': {
                 'service': 'object',
                 'method': 'execute',
-                'args': [ODOO_DB, session['uid'], session['password'],
-                         'helpdesk.ticket', 'create', [ticket_data]]
+                'args': [
+                    ODOO_DB, session['uid'], session['password'],
+                    'x_tickets_ia', 'create',
+                    [ticket_data]
+                ]
             }
         }
-        response = requests.post(f"{ODOO_URL}/jsonrpc", json=create_ticket)
-        ticket_id = response.json().get('result')
-        logger.info(f"Ticket de escalamiento creado con ID: {ticket_id}")
+        ticket_resp = requests.post(f"{ODOO_URL}/jsonrpc", json=create_ticket).json()
+        if ticket_resp.get('error'):
+            logger.error(f"No se pudo crear ticket en Odoo: {ticket_resp['error']}")
+        else:
+            logger.info(f"Ticket de reclamo creado en Odoo: {ticket_resp.get('result')}")
 
-        # 3️⃣ (Opcional) Notificar al usuario que se ha escalado
-        send_whatsapp_message(
-            message_info['phone'],
-            "Hemos recibido tu mensaje y nuestro equipo lo atenderá como reclamo."
-        )
+        # 3️⃣ Notificar al cliente por WhatsApp
+        send_whatsapp_message(message_info['phone'], 
+                              "Tu mensaje ha sido escalado y un agente te contactará pronto. ¡Gracias por tu paciencia!")
 
     except Exception as e:
-        logger.error(f"Error escalando mensaje y creando ticket: {e}")
-
+        logger.error(f"Error escalando mensaje: {e}")
 
 # ===========================
 # WhatsApp API
@@ -693,6 +715,7 @@ def send_whatsapp_message(phone, message_text):
 # ===========================
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+
 
 
 
