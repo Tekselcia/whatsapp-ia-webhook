@@ -272,12 +272,12 @@ def get_or_create_partner(message_info):
         }
         
    
-response = requests.post(f"{ODOO_URL}/jsonrpc", json=create_data)
-logger.info(f"DEBUG - Create message response: {response.text}")
-logger.info(f"DEBUG - Create message status: {response.status_code}")
-result = response.json().get('result')
-logger.info(f"DEBUG - Message ID created: {result}")
-return result
+        response = requests.post(f"{ODOO_URL}/jsonrpc", json=create_data)
+        logger.info(f"DEBUG - Create message response: {response.text}")
+        logger.info(f"DEBUG - Create message status: {response.status_code}")
+        result = response.json().get('result')
+        logger.info(f"DEBUG - Message ID created: {result}")
+        return result
     
     except Exception as e:
         logger.error(f"Error con contacto: {e}")
@@ -635,7 +635,7 @@ def escalate_message(message_id, message_info):
                     'x_ia_tai', 'write',
                     [message_id],
                     {
-                     """x_requiere_humano': True,"""
+                        'x_requiere_humano': True,
                         'x_studio_estado': 'escalated'
                     }
                 ]
@@ -713,6 +713,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
 
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
