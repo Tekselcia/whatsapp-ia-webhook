@@ -298,50 +298,86 @@ def get_or_create_partner(message_info):
         return None
 
 def create_odoo_message(message_info, partner_id):
+    """
+    Crear mensaje en Odoo con validación de payload.
+    Devuelve el ID del mensaje creado o None.
+    """
     try:
+        if not partner_id:
+            logger.error("[ERROR] No se puede crear mensaje: partner_id es None")
+            return None
+
         session = authenticate_odoo()
-        create_data = {
+
+        payload_data = {
+            'x_studio_partner_id': partner_id,
+            'x_studio_partner_phone': message_info['phone'],
+            'x_studio_tipo_de_mensaje': 'inbound',
+            'x_studio_mensaje_whatsapp': message_info['text'],
+            'x_studio_date': datetime.now().replace(microsecond=0).isoformat(),
+            'x_studio_estado': 'received'
+        }
+
+        create_payload = {
             'jsonrpc': '2.0',
             'method': 'call',
             'params': {
                 'service': 'object',
                 'method': 'execute',
                 'args': [
-                    ODOO_DB, session['uid'], session['password'],
-                    'x_ia_tai', 'create',
-                    {
-                        'x_studio_partner_id': partner_id,
-                        'x_studio_partner_phone': message_info['phone'],
-                        'x_studio_tipo_de_mensaje': 'inbound',
-                        'x_studio_mensaje_whatsapp': message_info['text'],
-                        'x_studio_date': datetime.now().replace(microsecond=0).isoformat(),
-                        'x_studio_estado': 'received'
-                    }
+                    ODOO_DB,
+                    session['uid'],
+                    session['password'],
+                    'x_ia_tai',
+                    'create',
+                    payload_data
                 ]
             }
         }
 
-        # Validar payload
-        validation_errors = validate_odoo_payload_generic('x_ia_tai', create_data)
+        # Validar payload antes de enviar
+        validation_errors = validate_odoo_payload('x_ia_tai', create_payload)
         if validation_errors:
             logger.error(f"[ERROR] Payload inválido Odoo: {validation_errors}")
             return None
 
-        response = requests.post(f"{ODOO_URL}/jsonrpc", json=create_data)
-        result = response.json().get('result')
+        logger.info(f"[DEBUG] Payload para Odoo: {json.dumps(create_payload, indent=2)}")
+        response = requests.post(f"{ODOO_URL}/jsonrpc", json=create_payload)
+        logger.info(f"[DEBUG] Respuesta de Odoo: status={response.status_code}, body={response.text}")
+
+        resp_json = response.json()
+        if 'error' in resp_json:
+            logger.error(f"[ERROR] Odoo respondió con error: {json.dumps(resp_json['error'], indent=2)}")
+            return None
+
+        result = resp_json.get('result')
+        if not result:
+            logger.error("[ERROR] No se creó el mensaje en Odoo. 'result' es None o vacío.")
+            return None
+
+        logger.info(f"[DEBUG] Mensaje creado en Odoo con ID: {result}")
         return result
+
     except Exception as e:
-        logger.error(f"Error create_odoo_message: {e}")
+        logger.error(f"[ERROR] Excepción creando mensaje en Odoo: {e}")
         return None
 
-def validate_odoo_payload_generic(model_name, payload):
+def validate_odoo_payload(model_name, payload):
+    """
+    Valida un payload de Odoo para cualquier modelo.
+    - Verifica campos obligatorios (no None ni vacío)
+    - Valida campos de fecha en formato ISO 8601
+    """
     errors = []
     try:
-        data = payload.get('params', {}).get('args', [])[4]
-        if not data:
-            errors.append("Payload vacío")
+        args = payload.get('params', {}).get('args', [])
+        if len(args) < 5 or not isinstance(args[4], dict):
+            errors.append("Payload inválido: args[4] no es un diccionario")
             return errors
 
+        data = args[4]
+
+        # Campos obligatorios por modelo
         required_fields_by_model = {
             'x_ia_tai': [
                 'x_studio_partner_id',
@@ -352,20 +388,25 @@ def validate_odoo_payload_generic(model_name, payload):
                 'x_studio_estado'
             ]
         }
+
         required_fields = required_fields_by_model.get(model_name, [])
         for field in required_fields:
             if field not in data or data[field] in [None, '']:
                 errors.append(f"Campo obligatorio faltante o vacío: {field}")
 
+        # Validar fechas ISO
         for key, value in data.items():
             if 'date' in key.lower() and value:
                 try:
                     datetime.fromisoformat(value)
                 except Exception:
                     errors.append(f"Campo {key} no tiene formato ISO 8601 válido: {value}")
+
     except Exception as e:
         errors.append(f"Error validando payload: {e}")
+
     return errors
+
 
 # ===========================
 # IA, escalamiento, logs
@@ -576,6 +617,7 @@ def send_whatsapp_message(phone, message_text):
 # ===========================
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+
 
 
 
