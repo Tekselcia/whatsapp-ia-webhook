@@ -211,7 +211,7 @@ async def handle_message(request: Request):
                         ODOO_DB,
                         session['uid'],
                         session['password'],
-                        'x_tickets_ia_tai',  # Modelo del ticket
+                        'helpdesk.ticket',  # Modelo del ticket
                         'create',
                         [{
                             'x_studio_nombre': f"Escalamiento desde WhatsApp - {sender}",
@@ -784,6 +784,7 @@ def send_whatsapp_message(phone, message_text):
 # ===========================
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+
 
 
 
