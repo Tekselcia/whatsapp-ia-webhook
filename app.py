@@ -5,7 +5,6 @@ import json
 import logging
 from datetime import datetime
 import os
-from flask import Flask, request, jsonify
 
 
 # ===========================
@@ -176,10 +175,29 @@ def extract_message_info(message, value):
 # ===========================
 # Manejo completo del mensaje
 # ===========================
-@app.post("/webhook")
-async def handle_message(request: Request):
+def generar_respuesta_openai(text, config, prompt):
+    import openai
+    openai.api_key = config['api_key']
+    response = openai.ChatCompletion.create(
+        model=config['model_name'],
+        messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": text}
+        ],
+        max_tokens=config['max_tokens'],
+        temperature=config['temperature']
+    )
+    return response.choices[0].message['content']
+
+def send_whatsapp_message(to, message):
+    # Ajusta según tu API de WhatsApp
+    payload = {"to": to, "message": message}
+    requests.post("https://api.whatsapp.com/sendMessage", json=payload)
+
+@app.route('/webhook', methods=['POST'])
+def handle_message():
     try:
-        data = await request.json()
+        data = request.get_json()
         logger.info(f"[STEP 1] Webhook recibido: {data}")
 
         message = data.get('message', {})
@@ -188,29 +206,27 @@ async def handle_message(request: Request):
 
         if not text:
             logger.warning("[STEP 2] Mensaje vacío o sin texto")
-            return {"status": "sin texto"}
+            return jsonify({"status": "sin texto"})
 
         logger.info(f"[STEP 3] Mensaje recibido de {sender}: {text}")
 
-        # 🔹 Obtener configuración de IA desde Odoo
+        # Obtener configuración IA
         ia_config = get_ia_config()
         if not ia_config:
             logger.error("[STEP 4] No se encontró configuración de IA")
-            return {"status": "sin configuración"}
+            return jsonify({"status": "sin configuración"})
 
-        # 🔹 Analizar si es palabra de escalamiento
+        # Analizar palabras de escalamiento
         escalation_keywords = ia_config.get('escalation_keywords', '').lower().split(',')
         is_escalation = any(word.strip() in text.lower() for word in escalation_keywords)
 
         session = authenticate_odoo()
         if not session:
             logger.error("[STEP 5] Falló la autenticación con Odoo")
-            return {"status": "error autenticación"}
+            return jsonify({"status": "error autenticación"})
 
         if is_escalation:
             logger.info("[STEP 6] Palabra de escalamiento detectada 🚨")
-
-            # ✅ Crear ticket en Odoo
             ticket_data = {
                 'jsonrpc': '2.0',
                 'method': 'call',
@@ -221,7 +237,7 @@ async def handle_message(request: Request):
                         ODOO_DB,
                         session['uid'],
                         session['password'],
-                        'helpdesk.ticket',  # Modelo del ticket
+                        'helpdesk.ticket',
                         'create',
                         [{
                             'x_studio_nombre': f"Escalamiento desde WhatsApp - {sender}",
@@ -233,22 +249,18 @@ async def handle_message(request: Request):
                     ]
                 }
             }
-
             resp_ticket = requests.post(f"{ODOO_URL}/jsonrpc", json=ticket_data)
             logger.info(f"[STEP 7] Ticket creado en Odoo: {resp_ticket.text}")
 
-            # ✅ Enviar confirmación al cliente
             send_whatsapp_message(sender, "📩 Hemos escalado tu mensaje con nuestro equipo. En breve un asesor te contactará. ¡Gracias por tu paciencia!")
-            
-            return {"status": "ticket creado"}
+            return jsonify({"status": "ticket creado"})
 
-        # 🔹 Generar respuesta con IA
+        # Generar respuesta IA
         prompt = ia_config.get('system_prompt', '')
         respuesta_ia = generar_respuesta_openai(text, ia_config, prompt)
-
         logger.info(f"[IA] Respuesta generada: {respuesta_ia}")
 
-        # 🔹 Registrar mensaje en Odoo
+        # Registrar mensaje en Odoo
         message_data = {
             'jsonrpc': '2.0',
             'method': 'call',
@@ -270,15 +282,13 @@ async def handle_message(request: Request):
                 ]
             }
         }
-
         response_odoo = requests.post(f"{ODOO_URL}/jsonrpc", json=message_data)
         logger.info(f"[STEP 8] Log IA creado: {response_odoo.text}")
 
-        # 🔹 Enviar respuesta al cliente por WhatsApp
         send_whatsapp_message(sender, respuesta_ia)
         logger.info(f"[STEP 9] Respuesta enviada a {sender}")
 
-        # 🔹 Actualizar estado del mensaje a “responded”
+        # Actualizar estado del mensaje
         try:
             message_id = response_odoo.json().get('result')
             if message_id:
@@ -303,13 +313,11 @@ async def handle_message(request: Request):
         except Exception as e:
             logger.error(f"[ERROR] No se pudo actualizar el estado: {e}")
 
-        return {"status": "ok"}
+        return jsonify({"status": "ok"})
 
     except Exception as e:
         logger.error(f"[ERROR handle_message]: {e}")
-        return {"status": "error", "detail": str(e)}
-
-
+        return jsonify({"status": "error", "detail": str(e)})
 
 
 # ===========================
@@ -794,6 +802,7 @@ def send_whatsapp_message(phone, message_text):
 # ===========================
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+
 
 
 
