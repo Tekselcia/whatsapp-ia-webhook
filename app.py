@@ -304,19 +304,25 @@ def create_odoo_message(message_info, partner_id):
             logger.error("[STEP 2] Sesión inválida para Odoo")
             return None
 
-        # mapear mensaje de WhatsApp a Odoo
+        # Mapear tipo de mensaje real de WhatsApp a Odoo
         tipo_mensaje_map = {
-            'entrada': 'inbound',   # O lo que acepte Odoo
-            'salida': 'outbound',
-            'otro': 'otro'
+            'text': 'inbound',
+            'button': 'inbound',
+            'interactive': 'inbound',
+            'salida': 'outbound'
         }
+        # Obtener tipo de mensaje según WhatsApp
+        tipo_mensaje = tipo_mensaje_map.get(message_info.get('type', 'text'), 'inbound')
 
-        tipo_mensaje = tipo_mensaje_map.get('entrada', 'otro')  # reemplaza 'entrada' por el valor que quieras mapear
+        # Asegurarse de que x_name tenga un valor
+        message_text = message_info.get('text') or 'Sin contenido'
+
         payload_data = {
+            'x_name': message_text,  # Coma corregida
             'x_studio_partner_id': partner_id,
-            'x_studio_partner_phone': message_info['phone'],
+            'x_studio_partner_phone': message_info.get('phone'),
             'x_studio_tipo_de_mensaje': tipo_mensaje,
-            'x_studio_mensaje_whatsapp': message_info['text'],
+            'x_studio_mensaje_whatsapp': message_text,
             'x_studio_date': datetime.now().replace(microsecond=0).isoformat(),
             'x_studio_estado': 'received'
         }
@@ -337,7 +343,7 @@ def create_odoo_message(message_info, partner_id):
                     ODOO_DB, session['uid'], session['password'],
                     'x_ia_tai',
                     'create',
-                    [payload_data]  # ✅ Debe ser lista
+                    [payload_data]  # Debe ser lista
                 ]
             }
         }
@@ -365,7 +371,6 @@ def create_odoo_message(message_info, partner_id):
         logger.error(f"[STEP 2] Excepción creando mensaje en Odoo: {e}")
         return None
 
-
 def validate_odoo_payload_fields(model_name, data):
     """
     Valida un payload de Odoo usando directamente el diccionario de campos.
@@ -382,6 +387,7 @@ def validate_odoo_payload_fields(model_name, data):
         # Campos obligatorios por modelo
         required_fields_by_model = {
             'x_ia_tai': [
+                'x_name',  # ✅ ahora es obligatorio
                 'x_studio_partner_id',
                 'x_studio_partner_phone',
                 'x_studio_tipo_de_mensaje',
@@ -619,6 +625,7 @@ def send_whatsapp_message(phone, message_text):
 # ===========================
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+
 
 
 
