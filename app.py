@@ -179,7 +179,10 @@ def update_message_status(message_id, new_status):
                     model,
                     "write",
                     ids_to_update,          # Lista de IDs
-                    {"x_studio_estado": new_status}  # Valores
+                    {
+                        "x_studio_estado": new_status,        # Estado del mensaje
+                        "x_studio_procesado_por_ia": True     # Marcar como procesado por IA
+                    }  # Valores
                 ]
             }
         }
@@ -231,6 +234,38 @@ def update_odoo_response(message_id, response_text):
             logger.error(f"Tipo de ID inválido: {type(message_id)}")
             return False
             
+        # Primero, obtener el estado actual para no sobrescribir escalated
+        get_data = {
+            "jsonrpc": "2.0",
+            "method": "call",
+            "params": {
+                "service": "object",
+                "method": "execute",
+                "args": [
+                    ODOO_DB,
+                    session["uid"],
+                    session["password"],
+                    model,
+                    "read",
+                    ids_to_update,
+                    ["x_studio_estado"]  # Solo necesitamos el estado
+                ]
+            }
+        }
+
+        get_resp = requests.post(f"{ODOO_URL}/jsonrpc", json=get_data)
+        get_json = get_resp.json()
+        if "error" in get_json:
+            logger.error(f"Odoo error al leer estado: {get_json['error']}")
+            return False
+
+        # Construir dict de actualización, solo cambiar estado si no está escalated
+        updates = {"x_studio_respuesta_ia": response_text}
+        for idx, record in enumerate(get_json.get("result", [])):
+            if record.get("x_studio_estado") != "escalated":
+                updates["x_studio_estado"] = "hecho"  # o el estado que desees
+
+        # Llamada para actualizar 
         data = {
             "jsonrpc": "2.0",
             "method": "call",
@@ -511,24 +546,30 @@ def webhook():
                     if odoo_id:
                         ia_config = get_ia_config()
                         palabras_escalamiento = []
-                        if ia_config:
-                            palabras_escalamiento = ia_config.get("escalation_keywords", "").lower().split(",")
+                    if ia_config:
+                        palabras_escalamiento = ia_config.get("escalation_keywords", "").lower().split(",")
 
-                        # Convertir a lista de palabras y limpiar espacios
-                        palabras_escalamiento = [p.strip() for p in palabras_escalamiento if p.strip()]
-                        # Si no hay palabras configuradas, usar predeterminadas
-                        if not palabras_escalamiento:
-                            palabras_escalamiento = ["asesor", "humano", "agente", "soporte", "persona", "ayuda"]
+                    palabras_escalamiento = [p.strip() for p in palabras_escalamiento if p.strip()]
 
-                        if any(p in msg_text_lower for p in palabras_escalamiento):
-                            logger.info("🚨 Escalamiento detectado. Actualizando estado en Odoo...")
-                            update_message_status(odoo_id, "escalado")
+                    if not palabras_escalamiento:
+                        palabras_escalamiento = ["asesor", "humano", "agente", "soporte", "persona", "ayuda"]
 
-                        # Generar respuesta IA y enviar
-                        if ia_config:
-                            respuesta_ia = generar_respuesta_openai(msg_text, ia_config, ia_config['system_prompt'])
-                            send_whatsapp_message(from_number, respuesta_ia)
-                            update_odoo_response(odoo_id, respuesta_ia)
+                    estado_actual = "received"
+
+                    # Detectar escalamiento
+                    if any(p in msg_text_lower for p in palabras_escalamiento):
+                        logger.info("🚨 Escalamiento detectado. Actualizando estado en Odoo...")
+                        update_message_status(odoo_id, "escalated")
+                        estado_actual = "escalated"
+
+                    # Generar respuesta IA
+                    if ia_config:
+                        respuesta_ia = generar_respuesta_openai(msg_text, ia_config, ia_config['system_prompt'])
+                        send_whatsapp_message(from_number, respuesta_ia)
+        
+                        # Actualizar respuesta IA y marcar procesado
+                        update_odoo_response(odoo_id, respuesta_ia, mark_processed=True, preserve_status=estado_actual)
+
 
         return "EVENT_RECEIVED", 200
     except Exception as e:
@@ -541,6 +582,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
