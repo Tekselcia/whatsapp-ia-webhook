@@ -149,21 +149,18 @@ def update_message_status(message_id, new_status):
 
         model = "x_ia_tai"
 
-        # Asegurar que message_id sea lista de enteros
+        # Aplanar y asegurar que message_id sea lista de enteros
+        ids_to_update = []
         if isinstance(message_id, int):
             ids_to_update = [message_id]
         elif isinstance(message_id, list):
-            # Aplanar y asegurar que todos sean enteros
             for mid in message_id:
                 if isinstance(mid, int):
                     ids_to_update.append(mid)
                 elif isinstance(mid, list):
                     ids_to_update.extend([int(x) for x in mid if isinstance(x, int)])
-            if not ids_to_update:
-                logger.error("No se encontró ningún ID válido para actualizar")
-                return False
-        else:
-            logger.error(f"Tipo de ID inválido: {type(message_id)}")
+        if not ids_to_update:
+            logger.error("No se encontró ningún ID válido para actualizar")
             return False
 
         data = {
@@ -178,7 +175,8 @@ def update_message_status(message_id, new_status):
                     session["password"],
                     model,
                     "write",
-                    [ids_to_update, {"x_studio_estado": new_status}]
+                    ids_to_update,          # Lista de IDs
+                    {"x_studio_estado": new_status}  # Valores
                 ]
             }
         }
@@ -190,10 +188,18 @@ def update_message_status(message_id, new_status):
             return False
 
         logger.info(f"Estado actualizado a '{new_status}' para IDs {ids_to_update}")
-        return True
+        # 🚨 ALERTA AUTOMÁTICA SI ES ESCALADO
+        if new_status.lower() == "escalado":
+            for mid in ids_to_update:
+                logger.warning(f"Mensaje ID {mid} está ESCALADO: requiere atención inmediata")
+                # Aquí puedes agregar integración con WhatsApp, email o cualquier otro sistema de alertas
+                # ejemplo: send_whatsapp_alert(mid, "El mensaje ha sido escalado y requiere acción.")
+
+         return True
     except Exception as e:
         logger.error(f"Error actualizando estado: {e}")
         return False
+
 
 def update_odoo_response(message_id, response_text):
     """Guarda la respuesta de la IA en el mensaje de Odoo."""
@@ -204,22 +210,19 @@ def update_odoo_response(message_id, response_text):
             return False
 
         model = "x_ia_tai"
-        
-        # Asegurarse de tener una lista plana de enteros
+
+        # Aplanar y asegurar que message_id sea lista de enteros
+        ids_to_update = []
         if isinstance(message_id, int):
             ids_to_update = [message_id]
         elif isinstance(message_id, list):
-            ids_to_update = []
             for mid in message_id:
                 if isinstance(mid, int):
                     ids_to_update.append(mid)
                 elif isinstance(mid, list):
                     ids_to_update.extend([int(x) for x in mid if isinstance(x, int)])
-            if not ids_to_update:
-                logger.error("No se encontró ningún ID válido para actualizar")
-                return False
-        else:
-            logger.error(f"Tipo de ID inválido: {type(message_id)}")
+        if not ids_to_update:
+            logger.error("No se encontró ningún ID válido para actualizar")
             return False
 
         data = {
@@ -234,7 +237,8 @@ def update_odoo_response(message_id, response_text):
                     session["password"],
                     model,
                     "write",
-                    [ids_to_update, {"x_studio_respuesta_ia": response_text}]
+                    ids_to_update,  # Lista de IDs
+                    {"x_studio_respuesta_ia": response_text}  # Valores
                 ]
             }
         }
@@ -531,6 +535,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
