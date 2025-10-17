@@ -6,6 +6,8 @@ import logging
 from datetime import datetime
 import os
 import sys
+from datetime import datetime, timedelta
+import pytz
 
 # ===========================
 # Configuración logging
@@ -139,7 +141,7 @@ def create_odoo_message(message_info, partner_id):
 # =========================
 # ACTUALIZAR ESTADO EN ODOO
 # =========================
-def update_message_status(message_id, new_status):
+def update_message_status(message_id, new_status, mark_processed=True):
     """Actualiza el campo x_studio_estado del mensaje en Odoo de manera segura."""
     try:
         session = authenticate_odoo()
@@ -207,7 +209,7 @@ def update_message_status(message_id, new_status):
         return False
 
 
-def update_odoo_response(message_id, response_text):
+def update_odoo_response(message_id, response_text, mark_processed=False):
     """Guarda la respuesta de la IA en el mensaje de Odoo."""
     try:
         session = authenticate_odoo()
@@ -541,7 +543,9 @@ def webhook():
 
                     # Crear mensaje en Odoo
                     odoo_id = create_odoo_message(message_info, partner_id)
-
+                    if not odoo_id:
+                        continue
+                        
                     # Validar escalamiento
                     if odoo_id:
                         ia_config = get_ia_config()
@@ -550,27 +554,52 @@ def webhook():
                         palabras_escalamiento = ia_config.get("escalation_keywords", "").lower().split(",")
 
                     palabras_escalamiento = [p.strip() for p in palabras_escalamiento if p.strip()]
-
+                                  
                     if not palabras_escalamiento:
                         palabras_escalamiento = ["asesor", "humano", "agente", "soporte", "persona", "ayuda"]
 
-                    estado_actual = "received"
+                    # estado_actual = "received"
 
-                    # Detectar escalamiento
+                    # Obtener registro de Odoo para este mensaje
+                    odoo_record = get_odoo_record(odoo_id)
+                    ia_activa = getattr(odoo_record, "x_studio_activo", True)
+                    ultima_hora_humano = getattr(odoo_record, "x_studio_hora_ultimo_humano", None)
+                    now_utc = datetime.utcnow().replace(tzinfo=pytz.UTC)
+
+                    # Si humano intervino en las últimas 4 horas, IA se mantiene desactivada
+                    if ultima_hora_humano:
+                        if now_utc - ultima_hora_humano < timedelta(hours=4):
+                            ia_activa = False
+                        else:
+                            ia_activa = True
+                        update_odoo_ia_status(odoo_id, active=ia_activa)
+
+                    # Detectar intervención humana
+                    if message.get("from_type") == "human":
+                        update_odoo_human_response(odoo_id, now_utc)
+                        update_odoo_ia_status(odoo_id, active=False)
+                        continue
+                    
+                    # Detectar /Validar escalamiento
                     if any(p in msg_text_lower for p in palabras_escalamiento):
                         logger.info("🚨 Escalamiento detectado. Actualizando estado en Odoo...")
-                        update_message_status(odoo_id, "escalated")
-                        estado_actual = "escalated"
+                        update_message_status(odoo_id, "escalated", mark_processed=True)
+                        continue
+                        # estado_actual = "escalated"
 
-                    # Generar respuesta IA
-                    if ia_config:
+                    # Solo responder si IA está activa y no ha procesado el mensaje
+                    # if ia_config and getattr(odoo_record, "x_studio_ia_activa", True) and not getattr(odoo_record, "x_studio_procesado_por_ia", False):
+                    if ia_activa and not getattr(odoo_record, "x_studio_procesado_por_ia", False):
+                        # Generar respuesta IA
                         respuesta_ia = generar_respuesta_openai(msg_text, ia_config, ia_config['system_prompt'])
                         send_whatsapp_message(from_number, respuesta_ia)
-        
-                        # Actualizar respuesta IA y marcar procesado
-                        update_odoo_response(odoo_id, respuesta_ia, mark_processed=True, preserve_status=estado_actual)
 
+                        # Guardar respuesta IA y marcar como procesado
+                        update_odoo_response(odoo_id, respuesta_ia, mark_processed=True)
 
+                        # Actualizar estado a "hecho"
+                        update_message_status(odoo_id, "hecho", mark_processed=True)     
+                  
         return "EVENT_RECEIVED", 200
     except Exception as e:
         logger.error(f"Error procesando webhook: {e}")
@@ -582,6 +611,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
