@@ -369,7 +369,6 @@ def home():
 @app.route("/webhook", methods=["GET"])
 def verify_webhook():
     """Verificación del token de Meta"""
-    WEBHOOK_VERIFY_TOKEN = "tu_token_verificacion"
     mode = request.args.get("hub.mode")
     token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
@@ -378,8 +377,9 @@ def verify_webhook():
         if mode == "subscribe" and token == WEBHOOK_VERIFY_TOKEN:
             logger.info("Webhook verificado correctamente.")
             return challenge, 200
-        logger.warning("Verificación fallida.")
-        return "Forbidden", 403
+        else:    
+            logger.warning("Verificación fallida.")
+            return "Forbidden", 403
     return "Bad Request", 400
 
 @app.route("/webhook", methods=["POST"])
@@ -388,34 +388,80 @@ def webhook():
     data = request.get_json()
     logger.info(f"Mensaje recibido: {json.dumps(data)}")
 
-    if data.get("object") == "whatsapp_business_account":
-        for entry in data.get("entry", []):
-            for change in entry.get("changes", []):
-                value = change.get("value", {})
-                messages = value.get("messages", [])
-                if not messages:
+    if data.get("object") != "whatsapp_business_account":
+        return "EVENT_RECEIVED", 200
+
+    for entry in data.get("entry", []):
+        for change in entry.get("changes", []):
+            value = change.get("value", {})
+            messages = value.get("messages", [])
+            contacts = value.get("contacts", [])
+
+            if not messages:
+                continue
+
+            for message in messages:
+                from_number = message.get("from")
+                msg_text = ""
+                msg_type = message.get("type", "text")
+
+                # Obtener el texto según el tipo de mensaje
+                if msg_type == "text":
+                    msg_text = message.get("text", {}).get("body", "").strip()
+                elif msg_type == "button":
+                    msg_text = message.get("button", {}).get("text", "")
+                elif msg_type == "interactive":
+                    interactive = message.get("interactive", {})
+                    if "button_reply" in interactive:
+                        msg_text = interactive["button_reply"].get("title", "")
+                    elif "list_reply" in interactive:
+                        msg_text = interactive["list_reply"].get("title", "")
+
+                msg_text_lower = msg_text.lower()
+
+                # Obtener nombre del contacto
+                contact_name = from_number
+                for contact in contacts:
+                    if contact.get("wa_id") == from_number:
+                        contact_name = contact.get("profile", {}).get("name", from_number)
+                        break
+
+                message_info = {
+                    "text": msg_text,
+                    "phone": from_number,
+                    "name": contact_name,
+                    "type": msg_type
+                }
+
+                # Crear partner en Odoo
+                partner_id = get_or_create_partner(message_info)
+
+                # Crear mensaje en Odoo
+                odoo_id = create_odoo_message(message_info, partner_id)
+
+                if not odoo_id:
+                    logger.error(f"No se pudo crear mensaje en Odoo para {from_number}")
                     continue
 
-                for message in messages:
-                    from_number = message.get("from")
-                    msg_text = message.get("text", {}).get("body", "").strip()
-                    msg_text_lower = msg_text.lower()
-
-                    message_info = {
-                        "text": msg_text,
-                        "phone": from_number
-                    }
-
-                    # Crear registro en Odoo
-                    partner_id = None  # Ajusta si tienes lógica de búsqueda de contacto
-                    odoo_id = create_odoo_message(message_info, partner_id)
-
-                    if odoo_id:
-                        # Palabras clave de escalamiento
+                # Palabras de escalamiento desde Odoo IA config
+                ia_config = get_ia_config()
+                palabras_escalamiento = []
+                if ia_config:
+                    palabras_escalamiento = ia_config.get("escalation_keywords", "").lower().split(",")
+                    palabras_escalamiento = [p.strip() for p in palabras_escalamiento if p.strip()]
+                    # Por seguridad, agrega palabras por defecto si no hay configuradas
+                    if not palabras_escalamiento:
                         palabras_escalamiento = ["asesor", "humano", "agente", "soporte", "persona", "ayuda"]
-                        if any(p in msg_text_lower for p in palabras_escalamiento):
-                            logger.info("🚨 Escalamiento detectado. Actualizando estado en Odoo...")
-                            update_message_status(odoo_id, "escalado")
+
+                # Verificar escalamiento
+                if any(p in msg_text_lower for p in palabras_escalamiento):
+                    logger.info(f"🚨 Escalamiento detectado para {from_number}. Actualizando estado en Odoo...")
+                    update_message_status(odoo_id, "escalado")
+
+                # Generar respuesta automática si está habilitada
+                if ia_config and ia_config.get("auto_response", False):
+                    respuesta_ia = generar_respuesta_openai(msg_text, ia_config, ia_config["system_prompt"])
+                    send_whatsapp_message(from_number, respuesta_ia)
 
     return "EVENT_RECEIVED", 200
 
@@ -426,6 +472,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
