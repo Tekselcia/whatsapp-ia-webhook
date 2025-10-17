@@ -367,19 +367,18 @@ def home():
 
 @app.route("/webhook", methods=["GET"])
 def verify_webhook():
-     """Verificación del token de Meta"""
-    VERIFY_TOKEN = "tu_token_verificacion"
+    """Verificación del token de Meta"""
+    WEBHOOK_VERIFY_TOKEN = "tu_token_verificacion"
     mode = request.args.get("hub.mode")
     token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
 
     if mode and token:
-        if mode == "subscribe" and token == VERIFY_TOKEN:
+        if mode == "subscribe" and token == WEBHOOK_VERIFY_TOKEN:
             logger.info("Webhook verificado correctamente.")
             return challenge, 200
-        else:
-            logger.warning("Verificación fallida.")
-            return "Forbidden", 403
+        logger.warning("Verificación fallida.")
+        return "Forbidden", 403
     return "Bad Request", 400
 
 @app.route("/webhook", methods=["POST"])
@@ -426,6 +425,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
