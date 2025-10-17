@@ -136,6 +136,42 @@ def create_odoo_message(message_info, partner_id):
         logger.error(f"Odoo error creating message: {e}")
         return None
 
+# =========================
+# ACTUALIZAR ESTADO EN ODOO
+# =========================
+def update_message_status(message_id, new_status):
+    """Actualiza el campo x_studio_estado del mensaje en Odoo."""
+    try:
+        session = authenticate_odoo()
+        if not session or not session.get("uid"):
+            logger.error("Sesión inválida para Odoo")
+            return False
+
+        model = "x_ia_tai"
+        data = {
+            "jsonrpc": "2.0",
+            "method": "call",
+            "params": {
+                "service": "object",
+                "method": "execute",
+                "args": [ODOO_DB, session["uid"], session["password"],
+                         model, "write", [[message_id], {"x_studio_estado": new_status}]]
+            }
+        }
+
+        response = requests.post(f"{ODOO_URL}/jsonrpc", json=data)
+        resp_json = response.json()
+        if "error" in resp_json:
+            logger.error(f"Odoo error al actualizar estado: {resp_json['error']}")
+            return False
+
+        logger.info(f"Estado actualizado a '{new_status}' para ID {message_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Error actualizando estado: {e}")
+        return False
+
+
 # ===========================
 # Funciones WhatsApp
 # ===========================
@@ -331,32 +367,66 @@ def home():
 
 @app.route("/webhook", methods=["GET"])
 def verify_webhook():
-    mode = request.args.get('hub.mode')
-    token = request.args.get('hub.verify_token')
-    challenge = request.args.get('hub.challenge')
-    if mode == 'subscribe' and token == WEBHOOK_VERIFY_TOKEN:
-        logger.info("Webhook verificado correctamente")
-        return challenge
-    else:
-        return "Token inválido", 403
+     """Verificación del token de Meta"""
+    VERIFY_TOKEN = "tu_token_verificacion"
+    mode = request.args.get("hub.mode")
+    token = request.args.get("hub.verify_token")
+    challenge = request.args.get("hub.challenge")
+
+    if mode and token:
+        if mode == "subscribe" and token == VERIFY_TOKEN:
+            logger.info("Webhook verificado correctamente.")
+            return challenge, 200
+        else:
+            logger.warning("Verificación fallida.")
+            return "Forbidden", 403
+    return "Bad Request", 400
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    try:
-        data = request.get_json()
-        logger.info(f"Mensaje recibido: {json.dumps(data)}")
-        if is_valid_message(data):
-            process_whatsapp_message(data)
-        return jsonify({'status': 'ok'})
-    except Exception as e:
-        logger.error(f"Error webhook POST: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+    """Recibe mensajes desde WhatsApp y los guarda en Odoo."""
+    data = request.get_json()
+    logger.info(f"Mensaje recibido: {json.dumps(data)}")
+
+    if data.get("object") == "whatsapp_business_account":
+        for entry in data.get("entry", []):
+            for change in entry.get("changes", []):
+                value = change.get("value", {})
+                messages = value.get("messages", [])
+                if not messages:
+                    continue
+
+                for message in messages:
+                    from_number = message.get("from")
+                    msg_text = message.get("text", {}).get("body", "").strip()
+                    msg_text_lower = msg_text.lower()
+
+                    message_info = {
+                        "text": msg_text,
+                        "phone": from_number
+                    }
+
+                    # Crear registro en Odoo
+                    partner_id = None  # Ajusta si tienes lógica de búsqueda de contacto
+                    odoo_id = create_odoo_message(message_info, partner_id)
+
+                    if odoo_id:
+                        # Palabras clave de escalamiento
+                        palabras_escalamiento = ["asesor", "humano", "agente", "soporte", "persona", "ayuda"]
+                        if any(p in msg_text_lower for p in palabras_escalamiento):
+                            logger.info("🚨 Escalamiento detectado. Actualizando estado en Odoo...")
+                            update_message_status(odoo_id, "escalado")
+
+    return "EVENT_RECEIVED", 200
+
+
 
 # ===========================
 # Ejecutar Flask
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
