@@ -138,6 +138,60 @@ def create_odoo_message(message_info, partner_id):
         logger.error(f"Odoo error creating message: {e}")
         return None
 
+def get_odoo_record(message_id):
+    """Obtiene los datos de un registro específico desde Odoo."""
+    try:
+        session = authenticate_odoo()
+        if not session or not session.get("uid"):
+            logger.error("Sesión inválida para Odoo")
+            return None
+
+        model = "x_ia_tai"
+
+        # Asegurar que message_id sea lista
+        ids_to_fetch = [message_id] if isinstance(message_id, int) else message_id
+
+        data = {
+            "jsonrpc": "2.0",
+            "method": "call",
+            "params": {
+                "service": "object",
+                "method": "execute",
+                "args": [
+                    ODOO_DB,
+                    session["uid"],
+                    session["password"],
+                    model,
+                    "read",
+                    ids_to_fetch,
+                    [
+                        "x_studio_estado",
+                        "x_studio_respuesta_ia",
+                        "x_studio_procesado_por_ia",
+                        "x_studio_hora_ultimo_humano",
+                        "x_studio_ia_activa"
+                    ],
+                ],
+            },
+        }
+
+        response = requests.post(f"{ODOO_URL}/jsonrpc", json=data)
+        resp_json = response.json()
+        if "error" in resp_json:
+            logger.error(f"Odoo error al obtener registro: {resp_json['error']}")
+            return None
+
+        records = resp_json.get("result", [])
+        if not records:
+            logger.warning(f"No se encontró registro con ID {message_id}")
+            return None
+
+        return records[0]  # Devolvemos el primer registro encontrado
+
+    except Exception as e:
+        logger.error(f"Error al obtener registro desde Odoo: {e}")
+        return None
+
 # =========================
 # ACTUALIZAR ESTADO EN ODOO
 # =========================
@@ -267,6 +321,9 @@ def update_odoo_response(message_id, response_text, mark_processed=False):
             if record.get("x_studio_estado") != "escalated":
                 updates["x_studio_estado"] = "hecho"  # o el estado que desees
 
+        if mark_processed:
+            updates["x_studio_procesado_por_ia"] = True
+            
         # Llamada para actualizar 
         data = {
             "jsonrpc": "2.0",
@@ -281,7 +338,7 @@ def update_odoo_response(message_id, response_text, mark_processed=False):
                     model,
                     "write",
                     ids_to_update,  # Lista de IDs
-                    {"x_studio_respuesta_ia": response_text}  # Valores
+                    updates                    # {"x_studio_respuesta_ia": response_text}  # Valores
                 ]
             }
         }
@@ -611,6 +668,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
