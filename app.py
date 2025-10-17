@@ -150,17 +150,23 @@ def update_message_status(message_id, new_status):
         model = "x_ia_tai"
 
         # Asegurar que message_id sea lista de enteros
-        if isinstance(message_id, int):
-            ids_to_update = [message_id]
-        elif isinstance(message_id, list):
-            # Si la lista tiene elementos, usar solo los enteros
-            ids_to_update = [m for m in message_id if isinstance(m, int)]
-            if not ids_to_update:
-                logger.error("No se encontró ningún ID válido para actualizar")
-                return False
-        else:
-            logger.error(f"Tipo de ID inválido: {type(message_id)}")
-            return False
+       if isinstance(message_id, int):
+           ids_to_update = [message_id]
+       elif isinstance(message_id, list):
+           # Aplanar y asegurar que todos sean enteros
+           ids_to_update = []
+           for mid in message_id:
+               if isinstance(mid, int):
+                   ids_to_update.append(mid)
+               elif isinstance(mid, list):
+                   ids_to_update.extend([int(x) for x in mid if isinstance(x, int)])
+           if not ids_to_update:
+               logger.error("No se encontró ningún ID válido para actualizar")
+               return False
+       else:
+           logger.error(f"Tipo de ID inválido: {type(message_id)}")
+           return False
+
 
         data = {
             "jsonrpc": "2.0",
@@ -190,6 +196,62 @@ def update_message_status(message_id, new_status):
     except Exception as e:
         logger.error(f"Error actualizando estado: {e}")
         return False
+
+def update_odoo_response(message_id, response_text):
+    """Guarda la respuesta de la IA en el mensaje de Odoo."""
+    try:
+        session = authenticate_odoo()
+        if not session or not session.get("uid"):
+            logger.error("Sesión inválida para Odoo")
+            return False
+
+        model = "x_ia_tai"
+        # Asegurarse de tener una lista plana de enteros
+    if isinstance(message_id, int):
+        ids_to_update = [message_id]
+    elif isinstance(message_id, list):
+        ids_to_update = []
+        for mid in message_id:
+            if isinstance(mid, int):
+                ids_to_update.append(mid)
+            elif isinstance(mid, list):
+                ids_to_update.extend([int(x) for x in mid if isinstance(x, int)])
+        if not ids_to_update:
+            logger.error("No se encontró ningún ID válido para actualizar")
+            return False
+    else:
+        logger.error(f"Tipo de ID inválido: {type(message_id)}")
+        return False
+
+        data = {
+            "jsonrpc": "2.0",
+            "method": "call",
+            "params": {
+                "service": "object",
+                "method": "execute",
+                "args": [
+                    ODOO_DB,
+                    session["uid"],
+                    session["password"],
+                    model,
+                    "write",
+                    [ids_to_update, {"x_studio_respuesta_ia": response_text}]
+                ]
+            }
+        }
+
+        response = requests.post(f"{ODOO_URL}/jsonrpc", json=data)
+        resp_json = response.json()
+        if "error" in resp_json:
+            logger.error(f"Odoo error al guardar respuesta IA: {resp_json['error']}")
+            return False
+
+        logger.info(f"Respuesta IA guardada para IDs {ids_to_update}")
+        return True
+    except Exception as e:
+        logger.error(f"Error guardando respuesta IA: {e}")
+        return False
+
 
 
 # ===========================
@@ -402,7 +464,6 @@ def verify_webhook():
     return "Bad Request", 400
 
 @app.route("/webhook", methods=["POST"])
-@app.route("/webhook", methods=["POST"])
 def webhook():
     """Recibe mensajes desde WhatsApp y los guarda en Odoo, maneja escalamiento."""
     try:
@@ -458,6 +519,7 @@ def webhook():
                         if ia_config:
                             respuesta_ia = generar_respuesta_openai(msg_text, ia_config, ia_config['system_prompt'])
                             send_whatsapp_message(from_number, respuesta_ia)
+                            update_odoo_response(odoo_id, respuesta_ia)
 
         return "EVENT_RECEIVED", 200
     except Exception as e:
@@ -470,6 +532,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
