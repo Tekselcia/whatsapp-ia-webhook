@@ -198,7 +198,7 @@ def update_message_status(message_id, new_status):
                 # Aquí puedes agregar integración con WhatsApp, email o cualquier otro sistema de alertas
                 # ejemplo: send_whatsapp_alert(mid, "El mensaje ha sido escalado y requiere acción.")
 
-         return True
+        return True
     except Exception as e:
         logger.error(f"Error actualizando estado: {e}")
         return False
@@ -541,6 +541,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
