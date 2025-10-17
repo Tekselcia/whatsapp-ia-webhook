@@ -148,14 +148,15 @@ def update_message_status(message_id, new_status):
             return False
 
         model = "x_ia_tai"
+        values = {"x_studio_estado": new_status}
         data = {
             "jsonrpc": "2.0",
             "method": "call",
             "params": {
                 "service": "object",
-                "method": "execute",
+                "method": "execute_kw",
                 "args": [ODOO_DB, session["uid"], session["password"],
-                         model, "write", [[message_id], {"x_studio_estado": new_status}]]
+                         model, "write", [[message_id], values]]
             }
         }
 
@@ -425,6 +426,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
