@@ -150,19 +150,22 @@ def update_message_status(message_id, new_status):
         model = "x_ia_tai"
 
         # Aplanar y asegurar que message_id sea lista de enteros
-        ids_to_update = []
-        if isinstance(message_id, int):
+       if isinstance(message_id, int):
             ids_to_update = [message_id]
         elif isinstance(message_id, list):
+            ids_to_update = []
             for mid in message_id:
                 if isinstance(mid, int):
                     ids_to_update.append(mid)
                 elif isinstance(mid, list):
                     ids_to_update.extend([int(x) for x in mid if isinstance(x, int)])
-        if not ids_to_update:
-            logger.error("No se encontró ningún ID válido para actualizar")
+            if not ids_to_update:
+                logger.error("No se encontró ningún ID válido para actualizar")
+                return False
+        else:
+            logger.error(f"Tipo de ID inválido: {type(message_id)}")
             return False
-
+            
         data = {
             "jsonrpc": "2.0",
             "method": "call",
@@ -212,19 +215,22 @@ def update_odoo_response(message_id, response_text):
         model = "x_ia_tai"
 
         # Aplanar y asegurar que message_id sea lista de enteros
-        ids_to_update = []
         if isinstance(message_id, int):
             ids_to_update = [message_id]
         elif isinstance(message_id, list):
+            ids_to_update = []
             for mid in message_id:
                 if isinstance(mid, int):
                     ids_to_update.append(mid)
                 elif isinstance(mid, list):
                     ids_to_update.extend([int(x) for x in mid if isinstance(x, int)])
-        if not ids_to_update:
-            logger.error("No se encontró ningún ID válido para actualizar")
+            if not ids_to_update:
+                logger.error("No se encontró ningún ID válido para actualizar")
+                return False
+        else:
+            logger.error(f"Tipo de ID inválido: {type(message_id)}")
             return False
-
+            
         data = {
             "jsonrpc": "2.0",
             "method": "call",
@@ -535,6 +541,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
