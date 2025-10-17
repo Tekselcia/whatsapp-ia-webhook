@@ -2,3 +2,4 @@ Flask==2.3.3
 requests==2.31.0
 openai==0.28.1
 gunicorn==21.2.0
+pytz
