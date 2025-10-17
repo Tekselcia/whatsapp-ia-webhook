@@ -150,7 +150,7 @@ def update_message_status(message_id, new_status):
         model = "x_ia_tai"
 
         # Aplanar y asegurar que message_id sea lista de enteros
-       if isinstance(message_id, int):
+        if isinstance(message_id, int):
             ids_to_update = [message_id]
         elif isinstance(message_id, list):
             ids_to_update = []
@@ -541,6 +541,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
