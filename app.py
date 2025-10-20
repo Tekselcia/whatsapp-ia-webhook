@@ -513,22 +513,88 @@ def send_whatsapp_message(phone, message_text):
 # ===========================
 # Funciones IA
 # ===========================
-def generar_respuesta_openai(text, config, prompt):
+def generar_respuesta_openai(message_id, text, config, prompt):
+    """
+    Genera respuesta considerando el contexto previo almacenado en Odoo.
+    """
     try:
-        openai.api_key = config['api_key']
+        session = authenticate_odoo()
+        model = "x_ia_tai"
+
+        # Obtener historial de mensajes previos
+        get_data = {
+            "jsonrpc": "2.0",
+            "method": "call",
+            "params": {
+                "service": "object",
+                "method": "execute",
+                "args": [
+                    ODOO_DB, session["uid"], session["password"],
+                    model, "read", [message_id],
+                    ["x_studio_mensajes_historial"]
+                ]
+            }
+        }
+        resp = requests.post(f"{ODOO_URL}/jsonrpc", json=get_data).json()
+        historial = resp.get("result", [{}])[0].get("x_studio_mensajes_historial", [])
+
+        # Preparar mensajes para OpenAI
+        messages = [{"role": "system", "content": prompt}]
+        for h in historial:
+            role = h.get("role", "user")
+            content = h.get("content", "")
+            messages.append({"role": role, "content": content})
+
+        # Agregar el nuevo mensaje
+        messages.append({"role": "user", "content": text})
+
+        # Llamada a OpenAI
         response = openai.ChatCompletion.create(
             model=config['model_name'],
-            messages=[
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": text}
-            ],
+            messages=messages,
             max_tokens=config['max_tokens'],
             temperature=config['temperature']
         )
-        return response.choices[0].message['content']
+        respuesta = response.choices[0].message['content']
+
+        # Guardar el mensaje y la respuesta en historial
+        historial.append({"role": "user", "content": text})
+        historial.append({"role": "assistant", "content": respuesta})
+
+        update_odoo_response_historial(message_id, historial)
+
+        return respuesta
+
     except Exception as e:
-        logger.error(f"Error generando respuesta OpenAI: {e}")
+        logger.error(f"Error generando respuesta OpenAI con historial: {e}")
         return "Disculpa, estamos teniendo problemas técnicos."
+
+def update_odoo_response_historial(message_id, historial):
+    try:
+        session = authenticate_odoo()
+        model = "x_ia_tai"
+        data = {
+            "jsonrpc": "2.0",
+            "method": "call",
+            "params": {
+                "service": "object",
+                "method": "execute",
+                "args": [
+                    ODOO_DB, session["uid"], session["password"],
+                    model, "write", [message_id],
+                    {"x_studio_mensajes_historial": historial}
+                ]
+            }
+        }
+        resp = requests.post(f"{ODOO_URL}/jsonrpc", json=data).json()
+        if "error" in resp:
+            logger.error(f"Error guardando historial en Odoo: {resp['error']}")
+            return False
+        return True
+    except Exception as e:
+        logger.error(f"Error update_odoo_response_historial: {e}")
+        return False
+
 
 def get_ia_config():
     try:
@@ -807,6 +873,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
