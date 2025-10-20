@@ -513,16 +513,19 @@ def send_whatsapp_message(phone, message_text):
 # ===========================
 # Funciones IA
 # ===========================
-def generar_respuesta_openai(message_id, text, config, prompt=None):
+def generar_respuesta_openai(message_id, text, config, prompt_base):
     """
-    Genera respuesta considerando el contexto previo y la Base de Conocimiento almacenada en Odoo.
+    Genera respuesta considerando:
+    - Historial de la conversación (x_ia_tai)
+    - Base de conocimiento (otro modelo en Odoo)
     """
     try:
         session = authenticate_odoo()
-        model = "x_ia_tai"
+        model_historial = "x_ia_tai"
+        model_base = "x_base_conocimiento"  # tu modelo de base de conocimiento
 
-        # 1️⃣ Obtener historial de mensajes previos
-        get_data = {
+        # 1️⃣ Traer historial
+        get_hist = {
             "jsonrpc": "2.0",
             "method": "call",
             "params": {
@@ -530,70 +533,68 @@ def generar_respuesta_openai(message_id, text, config, prompt=None):
                 "method": "execute",
                 "args": [
                     ODOO_DB, session["uid"], session["password"],
-                    model, "read", [message_id],
+                    model_historial, "read", [message_id],
                     ["x_studio_mensajes_historial"]
                 ]
             }
         }
-        resp = requests.post(f"{ODOO_URL}/jsonrpc", json=get_data).json()
-   #     record = resp.get("result", [{}])[0]
-   #     historial = record.get("x_studio_mensajes_historial", [])
-        historial_str = resp.get("result", [{}])[0].get("x_studio_mensajes_historial", "[]")
+        resp_hist = requests.post(f"{ODOO_URL}/jsonrpc", json=get_hist).json()
+        historial_str = resp_hist.get("result", [{}])[0].get("x_studio_mensajes_historial", "[]")
+        try:
+            historial = json.loads(historial_str)
+        except:
+            historial = []
 
-   
-   #     base_conocimiento = record.get("x_studio_base_conocimiento", "")
+        # 2️⃣ Traer información de la base de conocimiento
+        get_base = {
+            "jsonrpc": "2.0",
+            "method": "call",
+            "params": {
+                "service": "object",
+                "method": "execute",
+                "args": [
+                    ODOO_DB, session["uid"], session["password"],
+                    model_base, "search_read",
+                    [], ["name", "respuesta", "palabras_clave"]
+                ]
+            }
+        }
+        resp_base = requests.post(f"{ODOO_URL}/jsonrpc", json=get_base).json()
+        kb_entries = resp_base.get("result", [])
 
-        # 2️⃣ Preparar prompt del sistema integrando la Base de Conocimiento
-#      system_prompt = f"""
-#Eres un asistente experto. Usa la siguiente Base de Conocimiento para responder de manera precisa y detallada:
-#{base_conocimiento}
+        # Construir prompt de base de conocimiento
+        kb_text = ""
+        for entry in kb_entries:
+            kb_text += f"Pregunta: {entry.get('name', '')}\nRespuesta: {entry.get('respuesta', '')}\n\n"
 
-#Instrucciones:
-#- No pidas información al usuario si ya está en la Base de Conocimiento.
-#- Responde con ejemplos claros y detallados.
-#- Mantén un tono cordial y profesional.
-#"""
- #       if prompt:  # permite sobrescribir el prompt si se pasa
-  #          system_prompt = prompt
-        
-        # Acceder correctamente al contenido de la respuesta
-        if hasattr(response.choices[0], "message"):
-            respuesta = response.choices[0].message.content
-        else:
-            respuesta = response.choices[0]['message']['content']
-        # 3️⃣ Construir mensajes para OpenAI (historial + nuevo mensaje)
-        messages = [{"role": "system", "content": system_prompt}]
+        # 3️⃣ Preparar mensajes para OpenAI
+        messages = [{"role": "system", "content": prompt_base + "\n" + kb_text}]
         for h in historial:
             role = h.get("role", "user")
             content = h.get("content", "")
             messages.append({"role": role, "content": content})
+
         messages.append({"role": "user", "content": text})
 
         # 4️⃣ Llamada a OpenAI
         response = openai.ChatCompletion.create(
             model=config['model_name'],
             messages=messages,
-            max_tokens=config['max_tokens'],
-            temperature=config['temperature']
+            max_tokens=config.get('max_tokens', 500),
+            temperature=config.get('temperature', 0.7)
         )
-        # Acceder correctamente al contenido de la respuesta
-        if hasattr(response.choices[0], "message"):
-            respuesta = response.choices[0].message.content
-        else:
-            respuesta = response.choices[0]['message']['content']
-            
-        # 5️⃣ Guardar el mensaje del usuario y la respuesta de IA en historial
+        respuesta = response.choices[0].message.content
+
+        # 5️⃣ Guardar mensaje y respuesta en historial
         historial.append({"role": "user", "content": text})
         historial.append({"role": "assistant", "content": respuesta})
-        historial_json = json.dumps(historial)
-        update_odoo_response_historial(message_id, historial)
+        update_odoo_response_historial(message_id, json.dumps(historial))
 
         return respuesta
 
     except Exception as e:
         logger.error(f"Error generando respuesta OpenAI con historial y base: {e}")
         return "Disculpa, estamos teniendo problemas técnicos."
-
 
 def update_odoo_response_historial(message_id, historial):
     """Actualiza el historial de mensajes en Odoo."""
@@ -957,6 +958,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
