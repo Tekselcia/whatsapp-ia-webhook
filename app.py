@@ -915,7 +915,7 @@ def webhook():
                                 update_odoo_ia_status(odoo_id, active=True)
                                 logger.info("IA reactivada (>4h desde intervención humana)")
                          except Exception as e:
-                         logger.error(f"Error interpretando hora de humano: {e}")
+                             logger.error(f"Error interpretando hora de humano: {e}")
                     else:
                         ia_activa = True
                         update_odoo_ia_status(odoo_id, active=True)
@@ -950,6 +950,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
