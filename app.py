@@ -176,7 +176,7 @@ def get_odoo_record(message_id):
         }
 
         response = requests.post(f"{ODOO_URL}/jsonrpc", json=data)
-        resp_json = response.json()
+        resp_json = response
         if "error" in resp_json:
             logger.error(f"Odoo error al obtener registro: {resp_json['error']}")
             return None
@@ -413,7 +413,7 @@ def update_odoo_response(message_id, response_text, mark_processed=False, new_st
             }
         }
 
-        response = requests.post(f"{ODOO_URL}/jsonrpc", json=write_data).json()
+        response = requests.post(f"{ODOO_URL}/jsonrpc", json=write_data)
         resp_json = response.json()
         if "error" in resp_json:
             logger.error(f"Odoo error al guardar respuesta IA: {resp_json['error']}")
@@ -429,7 +429,17 @@ def update_odoo_ia_status(message_id, active=True):
     """Activa o desactiva la IA para un mensaje."""
     try:
         session = authenticate_odoo()
-        model = "x_ia_tai"
+        model = "x_ia_tai"ids_to_update = [message_id] if isinstance(message_id, int) else message_id
+        if isinstance(ids_to_update, list) and any(isinstance(x, list) for x in ids_to_update):
+            # Aplanar lista si hay sublistas
+            flat_ids = []
+            for x in ids_to_update:
+                if isinstance(x, list):
+                    flat_ids.extend([int(i) for i in x if isinstance(i, int)])
+                else:
+                    flat_ids.append(x)
+            ids_to_update = flat_ids
+
         data = {
             "jsonrpc": "2.0",
             "method": "call",
@@ -440,16 +450,16 @@ def update_odoo_ia_status(message_id, active=True):
                     ODOO_DB,
                     session["uid"],
                     session["password"],
-                    model,
+                    "x_ia_tai",
                     "write",
-                    [message_id],
+                    ids_to_update,
                     {"x_studio_ia_activa": active},
                 ],
             },
         }
-        response = requests.post(f"{ODOO_URL}/jsonrpc", json=data)
-        if "error" in response.json():
-            logger.error(f"Error actualizando estado de IA: {response.json()['error']}")
+        response = requests.post(f"{ODOO_URL}/jsonrpc", json=data).json()
+        if "error" in response:
+            logger.error(f"Error actualizando estado de IA: {response['error']}")
             return False
         logger.info(f"IA {'activada' if active else 'desactivada'} para mensaje {message_id}")
         return True
@@ -610,7 +620,7 @@ def update_odoo_response_historial(message_id, historial):
                 "args": [
                     ODOO_DB, session["uid"], session["password"],
                     model, "write", [message_id],
-                    {"x_studio_mensajes_historial": historial_json}
+                    {"x_studio_mensajes_historial": historial}
                 ]
             }
         }
@@ -958,6 +968,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
