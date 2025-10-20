@@ -781,13 +781,25 @@ def webhook():
                 value = change.get("value", {})
                 messages = value.get("messages", [])
                 contacts = value.get("contacts", [])
-
                 if not messages:
                     continue
 
                 for message in messages:
                     from_number = message.get("from")
-                    msg_text = message.get("text", {}).get("body", "").strip()
+                    msg_type = message.get("type", "text")
+                    if msg_type == "text":
+                        msg_text = message.get("text", {}).get("body", "").strip()
+                    elif msg_type == "button":
+                        msg_text = message.get("button", {}).get("text", "")
+                    elif msg_type == "interactive":
+                        interactive = message.get("interactive", {})
+                        if "button_reply" in interactive:
+                            msg_text = interactive["button_reply"].get("title", "")
+                        elif "list_reply" in interactive:
+                            msg_text = interactive["list_reply"].get("title", "")
+                    else:
+                        msg_text = ""
+                    
                     msg_text_lower = msg_text.lower()
 
                     message_info = {
@@ -802,18 +814,25 @@ def webhook():
                     odoo_id = create_odoo_message(message_info, partner_id)
                     if not odoo_id:
                         continue
-                        
-                    # Validar escalamiento
-                    if odoo_id:
-                        ia_config = get_ia_config()
-                        palabras_escalamiento = []
-                    if ia_config:
-                        palabras_escalamiento = ia_config.get("escalation_keywords", "").lower().split(",")
 
-                    palabras_escalamiento = [p.strip() for p in palabras_escalamiento if p.strip()]
+                    # Obtener configuración IA
+                    ia_config = get_ia_config()
+                    if not ia_config:
+                        logger.warning("No hay configuración IA activa")
+                        continue
+
+                    
+                    # Validar escalamiento
+         #           if odoo_id:
+          #              ia_config = get_ia_config()
+           #             palabras_escalamiento = []
+            #        if ia_config:
+             #           palabras_escalamiento = ia_config.get("escalation_keywords", "").lower().split(",")
+
+              #      palabras_escalamiento = [p.strip() for p in palabras_escalamiento if p.strip()]
                                   
-                    if not palabras_escalamiento:
-                        palabras_escalamiento = ["asesor", "humano", "agente", "soporte", "persona", "ayuda"]
+               #     if not palabras_escalamiento:
+                #        palabras_escalamiento = ["asesor", "humano", "agente", "soporte", "persona", "ayuda"]
 
                     # Obtener registro de Odoo
                     odoo_record = get_odoo_record(odoo_id)
@@ -849,6 +868,12 @@ def webhook():
                         ia_activa = True
                         update_odoo_ia_status(odoo_id, active=True)
 
+                     # Escalamiento
+                    palabras_escalamiento = ia_config.get("escalation_keywords", "").lower().split(",")
+                    palabras_escalamiento = [p.strip() for p in palabras_escalamiento if p.strip()]
+                    if not palabras_escalamiento:
+                        palabras_escalamiento = ["asesor","humano","agente","soporte","persona","ayuda"]
+                    
                     # 🚨 Escalamiento
                     if any(p in msg_text_lower for p in palabras_escalamiento):
                         logger.info("🚨 Escalamiento detectado. Actualizando estado en Odoo...")
@@ -873,6 +898,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
