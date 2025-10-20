@@ -573,6 +573,16 @@ def update_odoo_response_historial(message_id, historial):
     try:
         session = authenticate_odoo()
         model = "x_ia_tai"
+
+        # Convertir historial a texto legible para Odoo (opcional)
+        historial_texto = ""
+        for h in historial:
+            role = "Usuario" if h["role"] == "user" else "IA"
+            historial_texto += f"{role}: {h['content']}\n"
+
+        # Obtener ID de etapa "Hecho"
+        stage_id = get_stage_id("Hecho")  # Necesitamos esta función auxiliar
+
         data = {
             "jsonrpc": "2.0",
             "method": "call",
@@ -580,9 +590,20 @@ def update_odoo_response_historial(message_id, historial):
                 "service": "object",
                 "method": "execute",
                 "args": [
-                    ODOO_DB, session["uid"], session["password"],
-                    model, "write", [message_id],
-                    {"x_studio_mensajes_historial": historial}
+                    ODOO_DB,
+                    session["uid"],
+                    session["password"],
+                    model,
+                    "write",
+                    [message_id],
+                    {
+                        "x_studio_mensajes_historial": historial,
+                        "x_studio_historial_texto": historial_texto,  # si quieres mostrarlo como texto
+                        "x_studio_respuesta_ia": historial[-1]["content"],  # la última respuesta
+                        "x_studio_estado": "responded",
+                        "x_studio_procesado_por_ia": True,
+                        "stage_id": stage_id
+                    }
                 ]
             }
         }
@@ -594,6 +615,37 @@ def update_odoo_response_historial(message_id, historial):
     except Exception as e:
         logger.error(f"Error update_odoo_response_historial: {e}")
         return False
+
+def get_stage_id(nombre_etapa):
+    """
+    Devuelve el ID de la etapa según su nombre.
+    """
+    try:
+        session = authenticate_odoo()
+        search_data = {
+            "jsonrpc": "2.0",
+            "method": "call",
+            "params": {
+                "service": "object",
+                "method": "execute",
+                "args": [
+                    ODOO_DB,
+                    session["uid"],
+                    session["password"],
+                    "x_ia_tai_stage",  # o crm.stage según tu modelo
+                    "search_read",
+                    [["name", "=", nombre_etapa]],
+                    ["id"]
+                ]
+            }
+        }
+        response = requests.post(f"{ODOO_URL}/jsonrpc", json=search_data).json()
+        result = response.get("result", [])
+        if result:
+            return result[0]["id"]
+    except Exception as e:
+        logger.error(f"Error obteniendo ID de etapa {nombre_etapa}: {e}")
+    return False
 
 
 def get_ia_config():
@@ -898,6 +950,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
