@@ -531,28 +531,36 @@ def generar_respuesta_openai(message_id, text, config, prompt=None):
                 "args": [
                     ODOO_DB, session["uid"], session["password"],
                     model, "read", [message_id],
-                    ["x_studio_mensajes_historial", "x_studio_base_conocimiento"]
+                    ["x_studio_mensajes_historial"]
                 ]
             }
         }
         resp = requests.post(f"{ODOO_URL}/jsonrpc", json=get_data).json()
-        record = resp.get("result", [{}])[0]
-        historial = record.get("x_studio_mensajes_historial", [])
-        base_conocimiento = record.get("x_studio_base_conocimiento", "")
+   #     record = resp.get("result", [{}])[0]
+   #     historial = record.get("x_studio_mensajes_historial", [])
+        historial_str = resp.get("result", [{}])[0].get("x_studio_mensajes_historial", "[]")
+
+   
+   #     base_conocimiento = record.get("x_studio_base_conocimiento", "")
 
         # 2️⃣ Preparar prompt del sistema integrando la Base de Conocimiento
-        system_prompt = f"""
-Eres un asistente experto. Usa la siguiente Base de Conocimiento para responder de manera precisa y detallada:
-{base_conocimiento}
+#      system_prompt = f"""
+#Eres un asistente experto. Usa la siguiente Base de Conocimiento para responder de manera precisa y detallada:
+#{base_conocimiento}
 
-Instrucciones:
-- No pidas información al usuario si ya está en la Base de Conocimiento.
-- Responde con ejemplos claros y detallados.
-- Mantén un tono cordial y profesional.
-"""
-        if prompt:  # permite sobrescribir el prompt si se pasa
-            system_prompt = prompt
-
+#Instrucciones:
+#- No pidas información al usuario si ya está en la Base de Conocimiento.
+#- Responde con ejemplos claros y detallados.
+#- Mantén un tono cordial y profesional.
+#"""
+ #       if prompt:  # permite sobrescribir el prompt si se pasa
+  #          system_prompt = prompt
+        
+        # Acceder correctamente al contenido de la respuesta
+        if hasattr(response.choices[0], "message"):
+            respuesta = response.choices[0].message.content
+        else:
+            respuesta = response.choices[0]['message']['content']
         # 3️⃣ Construir mensajes para OpenAI (historial + nuevo mensaje)
         messages = [{"role": "system", "content": system_prompt}]
         for h in historial:
@@ -568,11 +576,16 @@ Instrucciones:
             max_tokens=config['max_tokens'],
             temperature=config['temperature']
         )
-        respuesta = response.choices[0].message['content']
-
+        # Acceder correctamente al contenido de la respuesta
+        if hasattr(response.choices[0], "message"):
+            respuesta = response.choices[0].message.content
+        else:
+            respuesta = response.choices[0]['message']['content']
+            
         # 5️⃣ Guardar el mensaje del usuario y la respuesta de IA en historial
         historial.append({"role": "user", "content": text})
         historial.append({"role": "assistant", "content": respuesta})
+        historial_json = json.dumps(historial)
         update_odoo_response_historial(message_id, historial)
 
         return respuesta
@@ -596,7 +609,7 @@ def update_odoo_response_historial(message_id, historial):
                 "args": [
                     ODOO_DB, session["uid"], session["password"],
                     model, "write", [message_id],
-                    {"x_studio_mensajes_historial": historial}
+                    {"x_studio_mensajes_historial": historial_json}
                 ]
             }
         }
@@ -944,6 +957,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
