@@ -304,7 +304,7 @@ def update_message_status(message_id, new_status, mark_processed=True):
         return False
 
 
-def update_odoo_response(message_id, response_text, mark_processed=False):
+def update_odoo_response(message_id, response_text, mark_processed=False, new_stage=None):
     """Guarda la respuesta de la IA en el mensaje de Odoo."""
     try:
         session = authenticate_odoo()
@@ -361,12 +361,41 @@ def update_odoo_response(message_id, response_text, mark_processed=False):
         for idx, record in enumerate(get_json.get("result", [])):
             if record.get("x_studio_estado") != "escalated":
                 updates["x_studio_estado"] = "responded"  # o el estado que desees
+        
+                # 🔹 Mapear estado → etapa
+                etapa_map = {
+                    "received": "Nuevo",
+                    "processing": "En proceso",
+                    "responded": "En proceso",
+                    "escalated": "En proceso",
+                    "closed": "Hecho"
+                }
+                etapa_nombre = etapa_map.get("responded", "En proceso")
 
+                # Buscar ID de etapa en Odoo
+                search_stage_data = {
+                    "jsonrpc": "2.0",
+                    "method": "call",
+                    "params": {
+                        "service": "object",
+                        "method": "execute",
+                        "args": [
+                            ODOO_DB, session["uid"], session["password"],
+                            "x_ia_tai_stage", "search",
+                            [["name", "=", etapa_nombre]], 1
+                        ]
+                    }
+                }
+                stage_result = requests.post(f"{ODOO_URL}/jsonrpc", json=search_stage_data).json().get("result", [])
+                if stage_result:
+                    updates["stage_id"] = stage_result[0]
+
+        
         if mark_processed:
             updates["x_studio_procesado_por_ia"] = True
             
         # Llamada para actualizar 
-        data = {
+        write_data = {
             "jsonrpc": "2.0",
             "method": "call",
             "params": {
@@ -384,18 +413,82 @@ def update_odoo_response(message_id, response_text, mark_processed=False):
             }
         }
 
-        response = requests.post(f"{ODOO_URL}/jsonrpc", json=data)
+        response = requests.post(f"{ODOO_URL}/jsonrpc", json=write_data).json()
         resp_json = response.json()
         if "error" in resp_json:
             logger.error(f"Odoo error al guardar respuesta IA: {resp_json['error']}")
             return False
 
-        logger.info(f"Respuesta IA guardada para IDs {ids_to_update}")
+        logger.info(f"Respuesta IA guardada y etapa actualizada para IDs {ids_to_update}")
         return True
     except Exception as e:
         logger.error(f"Error guardando respuesta IA: {e}")
         return False
 
+def update_odoo_ia_status(message_id, active=True):
+    """Activa o desactiva la IA para un mensaje."""
+    try:
+        session = authenticate_odoo()
+        model = "x_ia_tai"
+        data = {
+            "jsonrpc": "2.0",
+            "method": "call",
+            "params": {
+                "service": "object",
+                "method": "execute",
+                "args": [
+                    ODOO_DB,
+                    session["uid"],
+                    session["password"],
+                    model,
+                    "write",
+                    [message_id],
+                    {"x_studio_ia_activa": active},
+                ],
+            },
+        }
+        response = requests.post(f"{ODOO_URL}/jsonrpc", json=data)
+        if "error" in response.json():
+            logger.error(f"Error actualizando estado de IA: {response.json()['error']}")
+            return False
+        logger.info(f"IA {'activada' if active else 'desactivada'} para mensaje {message_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Error update_odoo_ia_status: {e}")
+        return False
+
+
+def update_odoo_human_response(message_id, timestamp):
+    """Guarda la hora de la última intervención humana."""
+    try:
+        session = authenticate_odoo()
+        model = "x_ia_tai"
+        data = {
+            "jsonrpc": "2.0",
+            "method": "call",
+            "params": {
+                "service": "object",
+                "method": "execute",
+                "args": [
+                    ODOO_DB,
+                    session["uid"],
+                    session["password"],
+                    model,
+                    "write",
+                    [message_id],
+                    {"x_studio_hora_ultimo_humano": timestamp.isoformat()},
+                ],
+            },
+        }
+        response = requests.post(f"{ODOO_URL}/jsonrpc", json=data)
+        if "error" in response.json():
+            logger.error(f"Error actualizando hora humano: {response.json()['error']}")
+            return False
+        logger.info(f"Última intervención humana actualizada en {timestamp}")
+        return True
+    except Exception as e:
+        logger.error(f"Error update_odoo_human_response: {e}")
+        return False
 
 
 # ===========================
@@ -656,48 +749,53 @@ def webhook():
                     if not palabras_escalamiento:
                         palabras_escalamiento = ["asesor", "humano", "agente", "soporte", "persona", "ayuda"]
 
-                    # estado_actual = "received"
-
-                    # Obtener registro de Odoo para este mensaje
+                    # Obtener registro de Odoo
                     odoo_record = get_odoo_record(odoo_id)
-                    ia_activa = getattr(odoo_record, "x_studio_activo", True)
-                    ultima_hora_humano = getattr(odoo_record, "x_studio_hora_ultimo_humano", None)
+                    if not odoo_record:
+                        continue
+
+                    ia_activa = odoo_record.get("x_studio_ia_activa", True)
+                    ultima_hora_humano = odoo_record.get("x_studio_hora_ultimo_humano")
                     now_utc = datetime.utcnow().replace(tzinfo=pytz.UTC)
 
-                    # Si humano intervino en las últimas 4 horas, IA se mantiene desactivada
-                    if ultima_hora_humano:
-                        if now_utc - ultima_hora_humano < timedelta(hours=4):
-                            ia_activa = False
-                        else:
-                            ia_activa = True
-                        update_odoo_ia_status(odoo_id, active=ia_activa)
-
-                    # Detectar intervención humana
+                    # Verificar si es un mensaje de un humano (por ejemplo, enviado desde Odoo manualmente)
                     if message.get("from_type") == "human":
                         update_odoo_human_response(odoo_id, now_utc)
                         update_odoo_ia_status(odoo_id, active=False)
+                        logger.info(f"IA desactivada por intervención humana en mensaje {odoo_id}")
                         continue
-                    
-                    # Detectar /Validar escalamiento
+
+                    # Si hubo intervención humana hace menos de 4 horas, IA sigue desactivada
+                    if ultima_hora_humano:
+                        try:
+                            last_human_dt = datetime.fromisoformat(ultima_hora_humano)
+                            if (now_utc - last_human_dt) < timedelta(hours=4):
+                                ia_activa = False
+                                update_odoo_ia_status(odoo_id, active=False)
+                                logger.info("IA sigue desactivada (<4h desde intervención humana)")
+                            else:
+                                ia_activa = True
+                                update_odoo_ia_status(odoo_id, active=True)
+                                logger.info("IA reactivada (>4h desde intervención humana)")
+                         except Exception as e:
+                         logger.error(f"Error interpretando hora de humano: {e}")
+                    else:
+                        ia_activa = True
+                        update_odoo_ia_status(odoo_id, active=True)
+
+                    # 🚨 Escalamiento
                     if any(p in msg_text_lower for p in palabras_escalamiento):
                         logger.info("🚨 Escalamiento detectado. Actualizando estado en Odoo...")
                         update_message_status(odoo_id, "escalated", mark_processed=True)
                         continue
-                        # estado_actual = "escalated"
 
-                    # Solo responder si IA está activa y no ha procesado el mensaje
-                    # if ia_config and getattr(odoo_record, "x_studio_ia_activa", True) and not getattr(odoo_record, "x_studio_procesado_por_ia", False):
-                    if ia_activa and not getattr(odoo_record, "x_studio_procesado_por_ia", False):
-                        # Generar respuesta IA
+                    # Si la IA está activa, genera respuesta
+                    if ia_activa:
                         respuesta_ia = generar_respuesta_openai(msg_text, ia_config, ia_config['system_prompt'])
                         send_whatsapp_message(from_number, respuesta_ia)
-
-                        # Guardar respuesta IA y marcar como procesado
                         update_odoo_response(odoo_id, respuesta_ia, mark_processed=True)
-
-                        # Actualizar estado a "responded"
-                        update_message_status(odoo_id, "responded", mark_processed=True)     
-                  
+                        update_message_status(odoo_id, "responded", mark_processed=True)
+                                    
         return "EVENT_RECEIVED", 200
     except Exception as e:
         logger.error(f"Error procesando webhook: {e}")
@@ -709,6 +807,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
