@@ -319,7 +319,7 @@ def update_odoo_response(message_id, response_text, mark_processed=False):
         updates = {"x_studio_respuesta_ia": response_text}
         for idx, record in enumerate(get_json.get("result", [])):
             if record.get("x_studio_estado") != "escalated":
-                updates["x_studio_estado"] = "hecho"  # o el estado que desees
+                updates["x_studio_estado"] = "responded"  # o el estado que desees
 
         if mark_processed:
             updates["x_studio_procesado_por_ia"] = True
@@ -654,8 +654,8 @@ def webhook():
                         # Guardar respuesta IA y marcar como procesado
                         update_odoo_response(odoo_id, respuesta_ia, mark_processed=True)
 
-                        # Actualizar estado a "hecho"
-                        update_message_status(odoo_id, "hecho", mark_processed=True)     
+                        # Actualizar estado a "responded"
+                        update_message_status(odoo_id, "responded", mark_processed=True)     
                   
         return "EVENT_RECEIVED", 200
     except Exception as e:
@@ -668,6 +668,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
