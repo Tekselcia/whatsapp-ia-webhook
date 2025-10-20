@@ -221,7 +221,48 @@ def update_message_status(message_id, new_status, mark_processed=True):
         else:
             logger.error(f"Tipo de ID inválido: {type(message_id)}")
             return False
+
+        # 🔹 Mapeo estado → etapa
+        etapa_map = {
+            "received": "Nuevo",
+            "processing": "En proceso",
+            "responded": "En proceso",
+            "escalated": "En proceso",
+            "closed": "Hecho"
+        }
+        etapa_nombre = etapa_map.get(new_status.lower(), "Nuevo")
+
+        # 🔹 Buscar ID de la etapa en Odoo
+        search_stage_data = {
+            "jsonrpc": "2.0",
+            "method": "call",
+            "params": {
+                "service": "object",
+                "method": "execute",
+                "args": [
+                    ODOO_DB,
+                    session["uid"],
+                    session["password"],
+                    "x_ia_tai_stage",  # Modelo de etapas
+                    "search",
+                    [["name", "=", etapa_nombre]],
+                    1
+                ]
+            }
+        }
+        stage_response = requests.post(f"{ODOO_URL}/jsonrpc", json=search_stage_data)
+        stage_result = stage_response.json().get("result", [])
+        stage_id = stage_result[0] if stage_result else False
+
+        # 🔹 Datos a actualizar
+        values = {
+            "x_studio_estado": new_status,
+            "x_studio_procesado_por_ia": mark_processed
+        }
+        if stage_id:
+            values["stage_id"] = stage_id  # actualiza la etapa si existe
             
+        
         data = {
             "jsonrpc": "2.0",
             "method": "call",
@@ -249,7 +290,7 @@ def update_message_status(message_id, new_status, mark_processed=True):
             logger.error(f"Odoo error al actualizar estado: {resp_json['error']}")
             return False
 
-        logger.info(f"Estado actualizado a '{new_status}' para IDs {ids_to_update}")
+        logger.info(f"Estado actualizado a '{new_status}' (etapa: {etapa_nombre}) para IDs {ids_to_update}")
         # 🚨 ALERTA AUTOMÁTICA SI ES ESCALADO
         if new_status.lower() == "escalado":
             for mid in ids_to_update:
@@ -668,6 +709,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
