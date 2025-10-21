@@ -429,16 +429,12 @@ def update_odoo_ia_status(message_id, active=True):
     """Activa o desactiva la IA para un mensaje."""
     try:
         session = authenticate_odoo()
-        model = "x_ia_tai"ids_to_update = [message_id] if isinstance(message_id, int) else message_id
-        if isinstance(ids_to_update, list) and any(isinstance(x, list) for x in ids_to_update):
-            # Aplanar lista si hay sublistas
-            flat_ids = []
-            for x in ids_to_update:
-                if isinstance(x, list):
-                    flat_ids.extend([int(i) for i in x if isinstance(i, int)])
-                else:
-                    flat_ids.append(x)
-            ids_to_update = flat_ids
+        model = "x_ia_tai"
+        ids_to_update = [message_id] if isinstance(message_id, int) else message_id
+        # Aplanar listas anidadas de IDs
+        if isinstance(ids_to_update, list):
+            ids_to_update = [int(i) for sub in ids_to_update for i in (sub if isinstance(sub, list) else [sub])]
+
 
         data = {
             "jsonrpc": "2.0",
@@ -450,7 +446,7 @@ def update_odoo_ia_status(message_id, active=True):
                     ODOO_DB,
                     session["uid"],
                     session["password"],
-                    "x_ia_tai",
+                    model,
                     "write",
                     ids_to_update,
                     {"x_studio_ia_activa": active},
@@ -968,6 +964,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
