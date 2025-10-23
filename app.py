@@ -252,15 +252,15 @@ def update_message_status(message_id, new_status, mark_processed=True):
         }
         stage_response = requests.post(f"{ODOO_URL}/jsonrpc", json=search_stage_data)
         stage_result = stage_response.json().get("result", [])
-        stage_id = stage_result[0] if stage_result else False
+        x_studio_stage_id = stage_result[0] if stage_result else False
 
         # 🔹 Datos a actualizar
         values = {
             "x_studio_estado": new_status,
             "x_studio_procesado_por_ia": mark_processed
         }
-        if stage_id:
-            values["stage_id"] = stage_id  # actualiza la etapa si existe
+        if x_studio_stage_id:
+            values["x_studio_stage_id"] = x_studio_stage_id  # actualiza la etapa si existe
             
         
         data = {
@@ -395,7 +395,7 @@ def update_odoo_response(message_id, response_text, mark_processed=False, new_st
                 }
                 stage_result = requests.post(f"{ODOO_URL}/jsonrpc", json=search_stage_data).json().get("result", [])
                 if stage_result:
-                    updates["stage_id"] = stage_result[0]  # ID entero, no lista
+                    updates["x_studio_stage_id"] = stage_result[0]  # ID entero, no lista
 
             if mark_processed:
                 updates["x_studio_procesado_por_ia"] = True
@@ -1082,6 +1082,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
