@@ -395,7 +395,7 @@ def update_odoo_response(message_id, response_text, mark_processed=False, new_st
                 }
                 stage_result = requests.post(f"{ODOO_URL}/jsonrpc", json=search_stage_data).json().get("result", [])
                 if stage_result:
-                    updates["x_studio_stage_id"] = stage_result[0]  # ID entero, no lista
+                    updates["stage_id"] = stage_result[0]  # ID entero, no lista
 
             if mark_processed:
                 updates["x_studio_procesado_por_ia"] = True
@@ -1082,6 +1082,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
