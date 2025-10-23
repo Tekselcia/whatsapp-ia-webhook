@@ -853,7 +853,7 @@ def process_whatsapp_message(data):
 
                 # Si IA está activa, generar respuesta
                 if ia_activa:
-                    respuesta_ia = generar_respuesta_openai(odoo_id, msg_text, ia_config, prompt_base)
+                    respuesta_ia = generar_respuesta_openai(odoo_id, msg_text, ia_config)
                     send_whatsapp_message(from_number, respuesta_ia)
                     update_odoo_response(odoo_id, respuesta_ia, mark_processed=True)
                     update_message_status(odoo_id, "responded", mark_processed=True)
@@ -1058,7 +1058,7 @@ def webhook():
 
                     # Si la IA está activa, genera respuesta
                     if ia_activa:
-                        respuesta_ia = generar_respuesta_openai(odoo_id, msg_text, ia_config, ia_config, prompt_base)
+                        respuesta_ia = generar_respuesta_openai(odoo_id, msg_text, ia_config)
                         send_whatsapp_message(from_number, respuesta_ia)
                         update_odoo_response(odoo_id, respuesta_ia, mark_processed=True)
                         update_message_status(odoo_id, "responded", mark_processed=True)
@@ -1074,6 +1074,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
