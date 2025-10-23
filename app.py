@@ -552,26 +552,34 @@ def generar_respuesta_openai(message_id, text, config, prompt_base):
             historial = []
 
         # 2️⃣ Traer información de la base de conocimiento
-        get_base = {
-            "jsonrpc": "2.0",
-            "method": "call",
-            "params": {
-                "service": "object",
-                "method": "execute",
-                "args": [
-                    ODOO_DB, session["uid"], session["password"],
-                    model_base, "search_read",
-                    [], ["name", "respuesta", "palabras_clave"]
-                ]
+        try:
+            get_base = {
+                "jsonrpc": "2.0",
+                "method": "call",
+                "params": {
+                    "service": "object",
+                    "method": "execute",
+                    "args": [
+                        ODOO_DB, session["uid"], session["password"],
+                        "x_base_conocimiento", "search_read",
+                        [["x_studio_activo", "=", True]],
+                        ["x_studio_pregunta", "x_studio_respuesta", "x_studio_palabras_clave"]
+                    ]
+                }
             }
-        }
-        resp_base = requests.post(f"{ODOO_URL}/jsonrpc", json=get_base).json()
-        kb_entries = resp_base.get("result", [])
+            resp_base = requests.post(f"{ODOO_URL}/jsonrpc", json=get_base).json()
+            kb_entries = resp_base.get("result", [])
 
-        # Construir prompt de base de conocimiento
-        kb_text = ""
-        for entry in kb_entries:
-            kb_text += f"Pregunta: {entry.get('name', '')}\nRespuesta: {entry.get('respuesta', '')}\n\n"
+            # Construir prompt base
+            prompt_base = "Eres un asistente profesional que responde cordialmente, usando la siguiente base de conocimiento:\n\n"
+            for entry in kb_entries:
+                pregunta = entry.get("x_studio_pregunta", "")
+                respuesta = entry.get("x_studio_respuesta", "")
+                prompt_base += f"Pregunta: {pregunta}\nRespuesta: {respuesta}\n\n"
+        except Exception as e:
+            logger.error(f"Error obteniendo base de conocimiento para prompt: {e}")
+            prompt_base = "Eres un asistente profesional. Responde cordialmente."
+        
 
         # 3️⃣ Preparar mensajes para OpenAI
         messages = [{"role": "system", "content": prompt_base + "\n" + kb_text}]
@@ -738,39 +746,131 @@ def process_whatsapp_message(data):
                         contact_name = contact.get('profile', {}).get('name', phone_number)
                         break
 
-                message_type = message.get('type', 'text')
-                message_text = ''
-                if message_type == 'text':
-                    message_text = message.get('text', {}).get('body', '')
-                elif message_type == 'button':
-                    message_text = message.get('button', {}).get('text', '')
-                elif message_type == 'interactive':
+                # Determinar tipo de mensaje
+                msg_type = message.get('type', 'text')
+                if msg_type == 'text':
+                    msg_text = message.get('text', {}).get('body', '')
+                elif msg_type == 'button':
+                    msg_text = message.get('button', {}).get('text', '')
+                elif msg_type == 'interactive':
                     interactive = message.get('interactive', {})
                     if 'button_reply' in interactive:
-                        message_text = interactive['button_reply'].get('title', '')
+                        msg_text = interactive['button_reply'].get('title', '')
                     elif 'list_reply' in interactive:
-                        message_text = interactive['list_reply'].get('title', '')
+                        msg_text = interactive['list_reply'].get('title', '')
+                    else:
+                        msg_text = ''
+                else:
+                    msg_text = ''
+
+                msg_text_lower = msg_text.lower()
 
                 message_info = {
-                    'phone': phone_number,
-                    'name': contact_name,
-                    'text': message_text,
-                    'type': message_type
+                    "text": msg_text,
+                    "phone": from_number,
+                    "name": contact_name,
+                    "type": msg_type
                 }
+                
 
                 # Crear partner
                 partner_id = get_or_create_partner(message_info)
 
                 # Crear mensaje en Odoo
-                create_odoo_message(message_info, partner_id)
+                odoo_id = create_odoo_message(message_info, partner_id)
+                if not odoo_id:
+                    continue
 
-                # Generar respuesta IA
+                # Obtener configuración IA
                 ia_config = get_ia_config()
-                if ia_config:
-                    respuesta_ia = generar_respuesta_openai(message_text, ia_config, ia_config['system_prompt'])
-                    send_whatsapp_message(phone_number, respuesta_ia)
+                if not ia_config:
+                    logger.warning("No hay configuración IA activa")
+                    continue
+
+                # Construir prompt base desde la base de conocimiento
+                try:
+                    session = authenticate_odoo()
+                    get_base = {
+                        "jsonrpc": "2.0",
+                        "method": "call",
+                        "params": {
+                            "service": "object",
+                            "method": "execute",
+                            "args": [
+                                ODOO_DB, session["uid"], session["password"],
+                                "x_base_conocimiento", "search_read",
+                                [["x_studio_activo", "=", True]],
+                                ["x_studio_pregunta", "x_studio_respuesta", "x_studio_palabras_clave"]
+                            ]
+                        }
+                    }
+                    resp_base = requests.post(f"{ODOO_URL}/jsonrpc", json=get_base).json()
+                    kb_entries = resp_base.get("result", [])
+
+                    prompt_base = "Eres un asistente profesional que responde cordialmente, usando la siguiente base de conocimiento:\n\n"
+                    for entry_kb in kb_entries:
+                        pregunta = entry_kb.get("x_studio_pregunta", "")
+                        respuesta = entry_kb.get("x_studio_respuesta", "")
+                        prompt_base += f"Pregunta: {pregunta}\nRespuesta: {respuesta}\n\n"
+                except Exception as e:
+                    logger.error(f"Error obteniendo base de conocimiento para prompt: {e}")
+                    prompt_base = "Eres un asistente profesional. Responde cordialmente."
+
+                # Obtener registro de Odoo para IA y última intervención humana
+                odoo_record = get_odoo_record(odoo_id)
+                if not odoo_record:
+                    continue
+
+                ia_activa = odoo_record.get("x_studio_ia_activa", True)
+                ultima_hora_humano = odoo_record.get("x_studio_hora_ultimo_humano")
+                now_utc = datetime.utcnow().replace(tzinfo=pytz.UTC)
+
+                # Verificar intervención humana
+                if message.get("from_type") == "human":
+                    update_odoo_human_response(odoo_id, now_utc)
+                    update_odoo_ia_status(odoo_id, active=False)
+                    logger.info(f"IA desactivada por intervención humana en mensaje {odoo_id}")
+                    continue
+
+                if ultima_hora_humano:
+                    try:
+                        last_human_dt = datetime.fromisoformat(ultima_hora_humano)
+                        if (now_utc - last_human_dt) < timedelta(hours=4):
+                            ia_activa = False
+                            update_odoo_ia_status(odoo_id, active=False)
+                            logger.info("IA sigue desactivada (<4h desde intervención humana)")
+                        else:
+                            ia_activa = True
+                            update_odoo_ia_status(odoo_id, active=True)
+                            logger.info("IA reactivada (>4h desde intervención humana)")
+                    except Exception as e:
+                        logger.error(f"Error interpretando hora de humano: {e}")
+                else:
+                    ia_activa = True
+                    update_odoo_ia_status(odoo_id, active=True)
+
+                # Escalamiento
+                palabras_escalamiento = ia_config.get("escalation_keywords", "").lower().split(",")
+                palabras_escalamiento = [p.strip() for p in palabras_escalamiento if p.strip()]
+                if not palabras_escalamiento:
+                    palabras_escalamiento = ["asesor","humano","agente","soporte","persona","ayuda"]
+
+                if any(p in msg_text_lower for p in palabras_escalamiento):
+                    logger.info("🚨 Escalamiento detectado. Actualizando estado en Odoo...")
+                    update_message_status(odoo_id, "escalated", mark_processed=True)
+                    continue
+
+                # Si IA está activa, generar respuesta
+                if ia_activa:
+                    respuesta_ia = generar_respuesta_openai(odoo_id, msg_text, ia_config, prompt_base)
+                    send_whatsapp_message(from_number, respuesta_ia)
+                    update_odoo_response(odoo_id, respuesta_ia, mark_processed=True)
+                    update_message_status(odoo_id, "responded", mark_processed=True)
+
+        return "EVENT_RECEIVED", 200
     except Exception as e:
         logger.error(f"Error procesando mensaje: {e}")
+        return "ERROR", 500
 
 def get_or_create_partner(message_info):
     try:
@@ -948,7 +1048,7 @@ def webhook():
 
                     # Si la IA está activa, genera respuesta
                     if ia_activa:
-                        respuesta_ia = generar_respuesta_openai(msg_text, ia_config, ia_config['system_prompt'])
+                        respuesta_ia = generar_respuesta_openai(odoo_id, msg_text, ia_config, ia_config, prompt_base)
                         send_whatsapp_message(from_number, respuesta_ia)
                         update_odoo_response(odoo_id, respuesta_ia, mark_processed=True)
                         update_message_status(odoo_id, "responded", mark_processed=True)
@@ -964,39 +1064,4 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
