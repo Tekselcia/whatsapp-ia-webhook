@@ -558,9 +558,9 @@ def generar_respuesta_openai(message_id, text, config):
                 "method": "execute",
                 "args": [
                     ODOO_DB, session["uid"], session["password"],
-                    model_base, "search_read",
+                    "x_base_conocimiento", "search_read",
                     [["x_studio_activo", "=", True]],
-                    ["x_studio_pregunta", "x_studio_respuesta", "x_studio_palabras_clave"]
+                    ["x_studio_pregunta", "x_studio_respuesta"]
                 ]
             }
         }
@@ -923,6 +923,25 @@ def verify_webhook():
             return "Forbidden", 403
     return "Bad Request", 400
 
+def webhook_odoo(request_json):
+    """
+    Ejemplo de webhook que recibe mensaje y responde con OpenAI
+    """
+    try:
+        data = request_json
+        message_id = data.get("message_id")
+        text = data.get("text")
+        config = {
+            "model_name": "gpt-3.5-turbo",
+            "max_tokens": 500,
+            "temperature": 0.7
+        }
+        respuesta = generar_respuesta_openai(message_id, text, config)
+        return {"respuesta": respuesta}
+    except Exception as e:
+        logger.error(f"Error en webhook: {e}")
+        return {"respuesta": "Error procesando mensaje"}
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
     """Recibe mensajes desde WhatsApp y los guarda en Odoo, maneja escalamiento."""
@@ -1055,5 +1074,6 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
