@@ -305,7 +305,7 @@ def update_message_status(message_id, new_status, mark_processed=True):
 
 
 def update_odoo_response(message_id, response_text, mark_processed=False, new_stage=None):
-    """Guarda la respuesta de la IA en el mensaje de Odoo."""
+    """Guarda la respuesta de la IA en el mensaje de Odoo y actualiza etapa."""
     try:
         session = authenticate_odoo()
         if not session or not session.get("uid"):
@@ -314,6 +314,8 @@ def update_odoo_response(message_id, response_text, mark_processed=False, new_st
 
         model = "x_ia_tai"
 
+        # 🔹 Aplanar message_id a lista de enteros
+        ids_to_update = []
         # Aplanar y asegurar que message_id sea lista de enteros
         if isinstance(message_id, int):
             ids_to_update = [message_id]
@@ -330,8 +332,8 @@ def update_odoo_response(message_id, response_text, mark_processed=False, new_st
         else:
             logger.error(f"Tipo de ID inválido: {type(message_id)}")
             return False
-            
-        # Primero, obtener el estado actual para no sobrescribir escalated
+
+        # 🔹 Leer estado actual de los registros
         get_data = {
             "jsonrpc": "2.0",
             "method": "call",
@@ -345,24 +347,25 @@ def update_odoo_response(message_id, response_text, mark_processed=False, new_st
                     model,
                     "read",
                     ids_to_update,
-                    ["x_studio_estado"]  # Solo necesitamos el estado
+                    ["x_studio_estado"]  # Solo necesitamos estado
                 ]
             }
         }
-
         get_resp = requests.post(f"{ODOO_URL}/jsonrpc", json=get_data)
         get_json = get_resp.json()
         if "error" in get_json:
             logger.error(f"Odoo error al leer estado: {get_json['error']}")
             return False
 
-        # Construir dict de actualización, solo cambiar estado si no está escalated
-        updates = {"x_studio_respuesta_ia": response_text}
-        for idx, record in enumerate(get_json.get("result", [])):
-            if record.get("x_studio_estado") != "escalated":
-                updates["x_studio_estado"] = "responded"  # o el estado que desees
-        
-                # 🔹 Mapear estado → etapa
+        # 🔹 Construir updates por cada registro individualmente
+        for record in get_json.get("result", []):
+            updates = {"x_studio_respuesta_ia": response_text}
+
+            estado_actual = record.get("x_studio_estado")
+            if estado_actual != "escalated":
+                updates["x_studio_estado"] = "responded"  # o el estado deseado
+
+                # Mapear estado a nombre de etapa
                 etapa_map = {
                     "received": "Nuevo",
                     "processing": "En proceso",
@@ -370,9 +373,9 @@ def update_odoo_response(message_id, response_text, mark_processed=False, new_st
                     "escalated": "En proceso",
                     "closed": "Hecho"
                 }
-                etapa_nombre = etapa_map.get("responded", "En proceso")
+                etapa_nombre = etapa_map.get(updates["x_studio_estado"], "En proceso")
 
-                # Buscar ID de etapa en Odoo
+                # Buscar ID de etapa en Odoo (solo un ID entero)
                 search_stage_data = {
                     "jsonrpc": "2.0",
                     "method": "call",
@@ -380,50 +383,55 @@ def update_odoo_response(message_id, response_text, mark_processed=False, new_st
                         "service": "object",
                         "method": "execute",
                         "args": [
-                            ODOO_DB, session["uid"], session["password"],
-                            "x_ia_tai_stage", "search",
-                            [["name", "=", etapa_nombre]], 1
+                            ODOO_DB,
+                            session["uid"],
+                            session["password"],
+                            "x_ia_tai_stage",
+                            "search",
+                            [["name", "=", etapa_nombre]],
+                            1
                         ]
                     }
                 }
                 stage_result = requests.post(f"{ODOO_URL}/jsonrpc", json=search_stage_data).json().get("result", [])
                 if stage_result:
-                    updates["stage_id"] = stage_result[0]
+                    updates["stage_id"] = stage_result[0]  # ID entero, no lista
 
-        
-        if mark_processed:
-            updates["x_studio_procesado_por_ia"] = True
-            
-        # Llamada para actualizar 
-        write_data = {
-            "jsonrpc": "2.0",
-            "method": "call",
-            "params": {
-                "service": "object",
-                "method": "execute",
-                "args": [
-                    ODOO_DB,
-                    session["uid"],
-                    session["password"],
-                    model,
-                    "write",
-                    ids_to_update,  # Lista de IDs
-                    updates                    # {"x_studio_respuesta_ia": response_text}  # Valores
-                ]
+            if mark_processed:
+                updates["x_studio_procesado_por_ia"] = True
+
+            # 🔹 Actualizar registro individualmente para evitar listas anidadas
+            write_data = {
+                "jsonrpc": "2.0",
+                "method": "call",
+                "params": {
+                    "service": "object",
+                    "method": "execute",
+                    "args": [
+                        ODOO_DB,
+                        session["uid"],
+                        session["password"],
+                        model,
+                        "write",
+                        [record["id"]],  # Lista de un solo ID
+                        updates
+                    ]
+                }
             }
-        }
-
-        response = requests.post(f"{ODOO_URL}/jsonrpc", json=write_data)
-        resp_json = response.json()
-        if "error" in resp_json:
-            logger.error(f"Odoo error al guardar respuesta IA: {resp_json['error']}")
-            return False
+            resp = requests.post(f"{ODOO_URL}/jsonrpc", json=write_data)
+            resp_json = resp.json()
+            if "error" in resp_json:
+                logger.error(f"Odoo error al guardar respuesta IA para ID {record['id']}: {resp_json['error']}")
 
         logger.info(f"Respuesta IA guardada y etapa actualizada para IDs {ids_to_update}")
         return True
+
     except Exception as e:
         logger.error(f"Error guardando respuesta IA: {e}")
         return False
+            
+    
+        
 
 def update_odoo_ia_status(message_id, active=True):
     """Activa o desactiva la IA para un mensaje."""
@@ -1074,6 +1082,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
