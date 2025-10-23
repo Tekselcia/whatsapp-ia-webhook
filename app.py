@@ -252,15 +252,15 @@ def update_message_status(message_id, new_status, mark_processed=True):
         }
         stage_response = requests.post(f"{ODOO_URL}/jsonrpc", json=search_stage_data)
         stage_result = stage_response.json().get("result", [])
-        x_studio_stage_id = stage_result[0] if stage_result else False
+        stage_id = stage_result[0] if stage_result else False
 
         # 🔹 Datos a actualizar
         values = {
             "x_studio_estado": new_status,
             "x_studio_procesado_por_ia": mark_processed
         }
-        if x_studio_stage_id:
-            values["x_studio_stage_id"] = x_studio_stage_id  # actualiza la etapa si existe
+        if stage_id:
+            values["stage_id"] = stage_id  # actualiza la etapa si existe
             
         
         data = {
@@ -1082,6 +1082,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
