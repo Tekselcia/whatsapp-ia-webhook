@@ -176,7 +176,7 @@ def get_odoo_record(message_id):
         }
 
         response = requests.post(f"{ODOO_URL}/jsonrpc", json=data)
-        resp_json = response
+        resp_json = response.json()
         if "error" in resp_json:
             logger.error(f"Odoo error al obtener registro: {resp_json['error']}")
             return None
@@ -964,6 +964,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
