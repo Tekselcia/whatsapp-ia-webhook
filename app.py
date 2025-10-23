@@ -359,7 +359,10 @@ def update_odoo_response(message_id, response_text, mark_processed=False, new_st
 
         # 🔹 Construir updates por cada registro individualmente
         for record in get_json.get("result", []):
-            updates = {"x_studio_respuesta_ia": response_text}
+            updates = {
+                "x_studio_respuesta_ia": response_text,
+                "x_studio_estado":"responded",
+            }
 
             estado_actual = record.get("x_studio_estado")
             if estado_actual != "escalated":
@@ -1082,6 +1085,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
