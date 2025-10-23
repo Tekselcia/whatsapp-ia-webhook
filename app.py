@@ -357,16 +357,23 @@ def update_odoo_response(message_id, response_text, mark_processed=False, new_st
             logger.error(f"Odoo error al leer estado: {get_json['error']}")
             return False
 
-        # 🔹 Construir updates por cada registro individualmente
-        for record in get_json.get("result", []):
-            updates = {
-                "x_studio_respuesta_ia": response_text,
-                "x_studio_estado":"responded",
-            }
+        updates = {"x_studio_respuesta_ia": response_text}
 
-            estado_actual = record.get("x_studio_estado")
-            if estado_actual != "escalated":
-                updates["x_studio_estado"] = "responded"  # o el estado deseado
+        # Solo cambiar estado si no está escalated
+        for record in get_json.get("result", []):
+            if record.get("x_studio_estado") != "escalated":
+                updates["x_studio_estado"] = "responded"
+                
+        # 🔹 Construir updates por cada registro individualmente
+      #  for record in get_json.get("result", []):
+       #     updates = {
+        #        "x_studio_respuesta_ia": response_text,
+         #       "x_studio_estado":"responded",
+          #  }
+
+       #     estado_actual = record.get("x_studio_estado")
+       # if estado_actual != "escalated":
+        #        updates["x_studio_estado"] = "responded"  # o el estado deseado
 
                 # Mapear estado a nombre de etapa
                 etapa_map = {
@@ -376,7 +383,9 @@ def update_odoo_response(message_id, response_text, mark_processed=False, new_st
                     "escalated": "En proceso",
                     "closed": "Hecho"
                 }
-                etapa_nombre = etapa_map.get(updates["x_studio_estado"], "En proceso")
+      #          etapa_nombre = etapa_map.get(updates["x_studio_estado"], "En proceso")
+                etapa_nombre = etapa_map.get("responded", "En proceso")
+
 
                 # Buscar ID de etapa en Odoo (solo un ID entero)
                 search_stage_data = {
@@ -416,25 +425,26 @@ def update_odoo_response(message_id, response_text, mark_processed=False, new_st
                         session["password"],
                         model,
                         "write",
-                        [record["id"]],  # Lista de un solo ID
+                    #    [record["id"]],  # Lista de un solo ID
+                        ids_to_update,
                         updates
                     ]
                 }
             }
-            resp = requests.post(f"{ODOO_URL}/jsonrpc", json=write_data)
-            resp_json = resp.json()
+            response = requests.post(f"{ODOO_URL}/jsonrpc", json=write_data)
+            resp_json = response.json()
             if "error" in resp_json:
-                logger.error(f"Odoo error al guardar respuesta IA para ID {record['id']}: {resp_json['error']}")
-
+             #   logger.error(f"Odoo error al guardar respuesta IA para ID {record['id']}: {resp_json['error']}")
+                logger.error(f"Odoo error al guardar respuesta IA: {resp_json['error']}")
+                return False
+                
         logger.info(f"Respuesta IA guardada y etapa actualizada para IDs {ids_to_update}")
         return True
 
     except Exception as e:
         logger.error(f"Error guardando respuesta IA: {e}")
         return False
-            
-    
-        
+                
 
 def update_odoo_ia_status(message_id, active=True):
     """Activa o desactiva la IA para un mensaje."""
@@ -1085,6 +1095,7 @@ def webhook():
 # ===========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
